@@ -4,9 +4,33 @@ An app for comparing scheduling policies on a GPU model you choose.
 
 You pick a workload, a model, and one or more schedulers. The app runs that same workload through each scheduler and shows which policy fits the model best. You can start from the files in `defaults/`, or replace any of them with your own.
 
-This repository is a skeleton. It has the sample inputs and the scheduler functions. The comparison runner is the next piece to build.
+Sample inputs, sample schedulers, and a comparison command are included. Run that command from a shell. It prints plain text and does not prompt, so an SSH session is enough to test it.
 
 Scheduling here is non-preemptive and request-level: when the GPU is free, the scheduler chooses which waiting request runs next. Dynamic scheduling, where the policy itself can change during a run, can be added later. `select(ready, now_ms)` is already called on every decision, so a later dynamic policy can use the clock and the waiting requests without a new plugin shape.
+
+## Run
+
+From this repo:
+
+```
+python -m gpu_bench
+```
+
+On a remote machine, SSH in and run the same command. Use `python3` when that is the Python 3 program on the host. Nothing else needs to be installed, and the process does not open a window or a browser.
+
+```
+ssh user@host
+cd /path/to/this/repo
+python -m gpu_bench
+```
+
+Each file in `defaults/workloads/` is run with the model it names, once for every scheduler in `defaults/schedulers/`. Pass paths to test your own files, and repeat a flag to compare more than one:
+
+```
+python -m gpu_bench --workload defaults/workloads/priority-mix.json --scheduler defaults/schedulers/fifo.py --scheduler defaults/schedulers/priority.py
+```
+
+`--model` overrides the model named by the workload.
 
 ## Layout
 
@@ -15,7 +39,7 @@ defaults/
   workloads/    requests arriving over time
   models/       how long a model takes to run a request
   schedulers/   policies you can compare
-gpu_bench/      where the app code will live
+gpu_bench/      the comparison command
 ```
 
 ## Default files
@@ -94,18 +118,17 @@ def select(ready, now_ms):
 
 Copy a file from `defaults/schedulers/`, change `select`, and point a run at your file. Leave the list you were given unchanged.
 
-## What a finished run will answer
+## What a run reports
 
-Once the runner exists, one workload plus one model plus several schedulers should report, for each policy:
+One workload, one model, and several schedulers report, for each policy:
 
-- mean and p95 latency (arrival to finish)
-- mean time spent waiting
-- throughput
+- mean and p95 latency, in milliseconds from arrival to finish (`mean_ms`, `p95_ms`)
+- mean time spent waiting, in milliseconds (`wait_ms`)
+- throughput, in jobs per second (`jobs/s`)
 
 The better policy is whichever one you care about for that model. Shortest-job often wins on average latency and loses on the long requests. Strict priority keeps high-priority work fast and can leave low-priority work waiting. Aging is the sample that pushes back on that.
 
 ## Later
 
-- A runner that loads these files and prints the comparison.
 - A way to swap the JSON model profile for your own GPU model.
 - Dynamic scheduling that can change policy mid-run.
