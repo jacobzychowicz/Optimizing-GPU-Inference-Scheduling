@@ -1,0 +1,57 @@
+{
+  "name": "token-mix",
+  "description": "A long language-model request arrives first. Shorter generations, including one high-priority request, wait behind it. Pairs with example-llm. Predicted duration is 30 + 25 * max_tokens.",
+  "model": "example-llm",
+  "jobs": [
+    {
+      "id": "long-gen",
+      "arrival_ms": 0,
+      "priority": 1,
+      "predicted_duration_ms": 6430,
+      "input": {
+        "prompt": "Write a detailed chapter about a harbor closing for the night.",
+        "max_tokens": 256
+      }
+    },
+    {
+      "id": "medium-gen",
+      "arrival_ms": 10,
+      "priority": 1,
+      "predicted_duration_ms": 1630,
+      "input": {
+        "prompt": "Summarize the shift notes from the loading dock.",
+        "max_tokens": 64
+      }
+    },
+    {
+      "id": "short-gen",
+      "arrival_ms": 20,
+      "priority": 1,
+      "predicted_duration_ms": 430,
+      "input": {
+        "prompt": "Reply with a one-sentence status.",
+        "max_tokens": 16
+      }
+    },
+    {
+      "id": "urgent-short",
+      "arrival_ms": 50,
+      "priority": 3,
+      "predicted_duration_ms": 230,
+      "input": {
+        "prompt": "Answer yes or no.",
+        "max_tokens": 8
+      }
+    },
+    {
+      "id": "medium-gen-2",
+      "arrival_ms": 200,
+      "priority": 1,
+      "predicted_duration_ms": 830,
+      "input": {
+        "prompt": "List the next three steps for the crew.",
+        "max_tokens": 32
+      }
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "name": "example-tts",
+  "description": "Stand-in text-to-speech model. Runtime grows with the number of characters in input.text. Replace this file with your own GPU model profile.",
+  "runtime": {
+    "base_ms": 40,
+    "per_character_ms": 3,
+    "text_field": "text"
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "name": "priority-mix",
+  "description": "Same-length text-to-speech requests that arrive together. Ids sort low priority first, so FIFO and shortest-job start at a-low. Priority and aging start at c-high. Predicted durations match example-tts.",
+  "model": "example-tts",
+  "jobs": [
+    {
+      "id": "a-low",
+      "arrival_ms": 0,
+      "priority": 1,
+      "predicted_duration_ms": 175,
+      "input": {
+        "text": "Please read this sentence aloud for the demo."
+      }
+    },
+    {
+      "id": "c-high",
+      "arrival_ms": 0,
+      "priority": 3,
+      "predicted_duration_ms": 175,
+      "input": {
+        "text": "Please read this sentence aloud for the demo."
+      }
+    },
+    {
+      "id": "b-mid",
+      "arrival_ms": 0,
+      "priority": 2,
+      "predicted_duration_ms": 175,
+      "input": {
+        "text": "Please read this sentence aloud for the demo."
+      }
+    },
+    {
+      "id": "a-low-2",
+      "arrival_ms": 100,
+      "priority": 1,
+      "predicted_duration_ms": 175,
+      "input": {
+        "text": "Please read this sentence aloud for the demo."
+      }
+    },
+    {
+      "id": "c-high-2",
+      "arrival_ms": 400,
+      "priority": 3,
+      "predicted_duration_ms": 175,
+      "input": {
+        "text": "Please read this sentence aloud for the demo."
+      }
+    }
+  ]
+}

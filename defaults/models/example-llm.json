@@ -1,0 +1,9 @@
+{
+  "name": "example-llm",
+  "description": "Stand-in language model. Runtime grows with input.max_tokens. Replace this file with your own GPU model profile.",
+  "runtime": {
+    "base_ms": 30,
+    "per_token_ms": 25,
+    "token_field": "max_tokens"
+  }
+}

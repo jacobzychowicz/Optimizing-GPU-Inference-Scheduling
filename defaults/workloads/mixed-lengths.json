@@ -1,0 +1,70 @@
+{
+  "name": "mixed-lengths",
+  "description": "A long text-to-speech request arrives first and holds the GPU. Shorter requests pile up behind it. FIFO then keeps arrival order. Shortest predicted job clears the short requests first. Predicted durations match example-tts.",
+  "model": "example-tts",
+  "jobs": [
+    {
+      "id": "long-1",
+      "arrival_ms": 0,
+      "priority": 1,
+      "predicted_duration_ms": 448,
+      "input": {
+        "text": "The harbor stays busy after dark. Cranes move containers from the ship to the yard, and a short announcement plays over the loudspeaker."
+      }
+    },
+    {
+      "id": "medium-1",
+      "arrival_ms": 30,
+      "priority": 1,
+      "predicted_duration_ms": 175,
+      "input": {
+        "text": "Please read this sentence aloud for the demo."
+      }
+    },
+    {
+      "id": "short-1",
+      "arrival_ms": 10,
+      "priority": 1,
+      "predicted_duration_ms": 58,
+      "input": {
+        "text": "Hello."
+      }
+    },
+    {
+      "id": "short-2",
+      "arrival_ms": 20,
+      "priority": 1,
+      "predicted_duration_ms": 61,
+      "input": {
+        "text": "Thanks."
+      }
+    },
+    {
+      "id": "short-3",
+      "arrival_ms": 200,
+      "priority": 1,
+      "predicted_duration_ms": 55,
+      "input": {
+        "text": "Stop."
+      }
+    },
+    {
+      "id": "short-4",
+      "arrival_ms": 210,
+      "priority": 1,
+      "predicted_duration_ms": 58,
+      "input": {
+        "text": "Go on."
+      }
+    },
+    {
+      "id": "long-2",
+      "arrival_ms": 220,
+      "priority": 1,
+      "predicted_duration_ms": 421,
+      "input": {
+        "text": "A late train pulls into the station. Doors open, people step off with their bags, and the platform speaker reads the next stop."
+      }
+    }
+  ]
+}
