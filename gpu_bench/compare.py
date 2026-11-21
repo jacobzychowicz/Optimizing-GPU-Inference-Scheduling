@@ -35,7 +35,10 @@ def load_select(path):
     if spec is None or spec.loader is None:
         raise ValueError(f"cannot load scheduler {path}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        raise ValueError(f"cannot load scheduler {path}: {exc}") from exc
     select = getattr(module, "select", None)
     if not callable(select):
         raise ValueError(f"{path} must define select(ready, now_ms)")
@@ -47,12 +50,23 @@ def duration_ms(model, job):
     runtime = model["runtime"]
     base = runtime["base_ms"]
     payload = job["input"]
+    job_id = job.get("id", "?")
     if "per_character_ms" in runtime:
         field = runtime.get("text_field", "text")
-        return base + runtime["per_character_ms"] * len(payload[field])
+        try:
+            size = len(payload[field])
+        except KeyError as exc:
+            raise ValueError(f"job {job_id} is missing input.{field}") from exc
+        except TypeError as exc:
+            raise ValueError(f"job {job_id} input.{field} is not text") from exc
+        return base + runtime["per_character_ms"] * size
     if "per_token_ms" in runtime:
         field = runtime.get("token_field", "max_tokens")
-        return base + runtime["per_token_ms"] * payload[field]
+        try:
+            size = payload[field]
+        except KeyError as exc:
+            raise ValueError(f"job {job_id} is missing input.{field}") from exc
+        return base + runtime["per_token_ms"] * size
     name = model.get("name", "model")
     raise ValueError(f"{name} has no per_character_ms or per_token_ms runtime")
 
@@ -121,14 +135,6 @@ def _nearest_rank(values, fraction):
     return ordered[index]
 
 
-def default_workloads():
-    return sorted(WORKLOADS.glob("*.json"))
-
-
-def default_schedulers():
-    return sorted(path for path in SCHEDULERS.glob("*.py") if not path.name.startswith("_"))
-
-
 def model_for(workload, override):
     if override is not None:
         return Path(override)
@@ -138,15 +144,26 @@ def model_for(workload, override):
     return MODELS / f"{name}.json"
 
 
-def compare(workload_path, model_path, scheduler_paths):
-    """Return the text report for one workload."""
+def compare(workload_path, model_path, schedulers):
+    """Return the text report for one workload.
+
+    schedulers is a list of (display name, path) pairs, in the order to print.
+    """
     workload = load_json(workload_path)
     model = load_json(model_path)
+    jobs = workload.get("jobs") or []
+    label = workload.get("name") or workload_path
+    if not jobs:
+        raise ValueError(f"workload {label} has no jobs")
+    for job in jobs:
+        missing = [key for key in ("id", "arrival_ms", "input") if key not in job]
+        if missing:
+            raise ValueError(f"job {job.get('id', '?')} in {label} is missing {', '.join(missing)}")
     rows = []
-    for path in scheduler_paths:
+    for name, path in schedulers:
         select = load_select(path)
-        finished = run_schedule(workload["jobs"], select, model, path.stem)
-        rows.append((path.stem, summarize(finished)))
+        finished = run_schedule(jobs, select, model, name)
+        rows.append((name, summarize(finished)))
     return format_report(workload, model, rows)
 
 
@@ -169,4 +186,15 @@ def format_report(workload, model, rows):
         )
     lines.append("")
     lines.append("mean_ms and p95_ms are latency from arrival to finish. wait_ms is time spent waiting.")
+    if len(rows) > 1:
+        mean, mean_names = _lowest(rows, "mean_latency_ms")
+        p95, p95_names = _lowest(rows, "p95_latency_ms")
+        lines.append(f"lowest mean latency: {', '.join(mean_names)} ({mean:.1f} ms)")
+        lines.append(f"lowest p95 latency: {', '.join(p95_names)} ({p95:.1f} ms)")
     return "\n".join(lines)
+
+
+def _lowest(rows, key):
+    scored = [(round(summary[key], 1), name) for name, summary in rows]
+    best = min(score for score, _name in scored)
+    return best, [name for score, name in scored if score == best]

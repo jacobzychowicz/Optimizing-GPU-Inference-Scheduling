@@ -10,27 +10,36 @@ Scheduling here is non-preemptive and request-level: when the GPU is free, the s
 
 ## Run
 
-From this repo:
+From this repo, list the names, then run a comparison:
 
 ```
-python -m gpu_bench
+python -m gpu_bench list
+python -m gpu_bench mixed-lengths fifo priority
 ```
 
-On a remote machine, SSH in and run the same command. Use `python3` when that is the Python 3 program on the host. Nothing else needs to be installed, and the process does not open a window or a browser.
+`list` prints the workloads, models, and schedulers. A workload name runs that workload with every scheduler. Add scheduler names to compare only those policies. With no names, every sample workload is compared on every sample scheduler.
+
+The workload's own model is used unless you pass another one:
+
+```
+python -m gpu_bench token-mix --model example-llm
+python -m gpu_bench priority-mix -s fifo,aging
+```
+
+A path works anywhere a name works:
+
+```
+python -m gpu_bench path/to/workload.json path/to/scheduler.py
+```
+
+SSH in and run the same commands. Use `python3` when that is the Python 3 program on the host. On Linux, `chmod +x gpu-bench` once, then `./gpu-bench` is the same command. Nothing else needs to be installed. The command does not prompt, and it does not open a window or a browser.
 
 ```
 ssh user@host
 cd /path/to/this/repo
-python -m gpu_bench
+python -m gpu_bench list
+python -m gpu_bench mixed-lengths
 ```
-
-Each file in `defaults/workloads/` is run with the model it names, once for every scheduler in `defaults/schedulers/`. Pass paths to test your own files, and repeat a flag to compare more than one:
-
-```
-python -m gpu_bench --workload defaults/workloads/priority-mix.json --scheduler defaults/schedulers/fifo.py --scheduler defaults/schedulers/priority.py
-```
-
-`--model` overrides the model named by the workload.
 
 ## Layout
 
@@ -116,7 +125,7 @@ def select(ready, now_ms):
     return ready[0]
 ```
 
-Copy a file from `defaults/schedulers/`, change `select`, and point a run at your file. Leave the list you were given unchanged.
+Copy a file from `defaults/schedulers/`, change `select`, and pass that file to the command above. Leave the list you were given unchanged.
 
 ## What a run reports
 
