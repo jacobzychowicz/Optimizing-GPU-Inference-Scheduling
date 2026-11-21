@@ -20,6 +20,8 @@ def main(argv=None):
 
 def dispatch(argv):
     if not argv:
+        if _terminal_can_prompt():
+            return _open_menu([])
         return cmd_run([])
 
     head, rest = argv[0], argv[1:]
@@ -31,11 +33,42 @@ def dispatch(argv):
             print(top_help())
             return 0
         return dispatch([rest[0], "-h", *rest[1:]])
+    if head == "menu":
+        return _open_menu(rest)
     if head == "list":
         return cmd_list(rest)
     if head == "run":
         return cmd_run(rest)
     return cmd_run(argv)
+
+
+def _terminal_can_prompt():
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _open_menu(rest):
+    prog = program_name()
+    if rest and rest[0] in ("-h", "--help"):
+        print(
+            f"usage: {prog} menu\n"
+            "\n"
+            "Open the numbered menu. Pick a model, a workload, and schedulers, then run.\n"
+            "Option 5 is the typed command line."
+        )
+        return 0
+    if rest:
+        print("error: menu takes no arguments", file=sys.stderr)
+        return 1
+    if not _terminal_can_prompt():
+        print(
+            "error: the menu needs an interactive terminal.\n"
+            f"Type a command instead, for example: {prog} mixed-lengths fifo priority",
+            file=sys.stderr,
+        )
+        return 1
+    from gpu_bench.menu import run_menu
+
+    return run_menu()
 
 
 def cmd_list(argv):
@@ -178,18 +211,20 @@ def program_name():
 
 def top_help():
     prog = program_name()
-    return f"""usage: {prog} [list|run] [name ...]
+    return f"""usage: {prog} [menu|list|run] [name ...]
 
-Compare schedulers on a workload and print the results.
-Names come from `{prog} list`. A path to your own file works anywhere a name works.
+In a terminal, `{prog}` opens a menu. Choose a model, a workload, and
+schedulers from the files in defaults/, then run. Option 5 is the typed
+command line. Names and flags still run directly, with no menu.
 
-  {prog} list
+  {prog}
   {prog} mixed-lengths fifo priority
+  {prog} list
   {prog} token-mix --model example-llm
   {prog} run priority-mix -s fifo,aging
 
-With no names, every sample workload is compared on every sample scheduler.
-`{prog} run -h` explains each flag.
+`{prog} run -h` explains each flag. With no terminal to answer, `{prog}`
+compares every sample workload on every sample scheduler.
 """
 
 

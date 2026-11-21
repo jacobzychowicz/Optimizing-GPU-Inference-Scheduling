@@ -4,41 +4,49 @@ An app for comparing scheduling policies on a GPU model you choose.
 
 You pick a workload, a model, and one or more schedulers. The app runs that same workload through each scheduler and shows which policy fits the model best. You can start from the files in `defaults/`, or replace any of them with your own.
 
-Sample inputs, sample schedulers, and a comparison command are included. Run that command from a shell. It prints plain text and does not prompt, so an SSH session is enough to test it.
+Sample inputs, sample schedulers, and a comparison command are included. In a terminal the command opens a menu of the files in `defaults/`. The typed commands are still there. A non-interactive SSH command prints the comparison without asking questions.
 
 Scheduling here is non-preemptive and request-level: when the GPU is free, the scheduler chooses which waiting request runs next. Dynamic scheduling, where the policy itself can change during a run, can be added later. `select(ready, now_ms)` is already called on every decision, so a later dynamic policy can use the clock and the waiting requests without a new plugin shape.
 
 ## Run
 
-From this repo, list the names, then run a comparison:
+From this repo, in a terminal:
+
+```
+python -m gpu_bench
+```
+
+That opens a menu. The files already in `defaults/models`, `defaults/workloads`, and `defaults/schedulers` are the choices.
+
+```
+1  model
+2  workload
+3  schedulers
+4  run
+5  legacy command line
+q  quit
+```
+
+Press 1 and the models loaded on the machine are listed. Pick one and the menu shows that model. Press 2 for workloads, then 3 for schedulers. A scheduler number adds or removes it, so you can change any of the three before you press 4 to run. Press 5 for the typed command line. It lists every name, then waits for you to type. `all` there runs every sample. An empty line returns to the menu.
+
+The typed commands still run on their own, with no menu:
 
 ```
 python -m gpu_bench list
 python -m gpu_bench mixed-lengths fifo priority
-```
-
-`list` prints the workloads, models, and schedulers. A workload name runs that workload with every scheduler. Add scheduler names to compare only those policies. With no names, every sample workload is compared on every sample scheduler.
-
-The workload's own model is used unless you pass another one:
-
-```
 python -m gpu_bench token-mix --model example-llm
 python -m gpu_bench priority-mix -s fifo,aging
-```
-
-A path works anywhere a name works:
-
-```
 python -m gpu_bench path/to/workload.json path/to/scheduler.py
 ```
 
-SSH in and run the same commands. Use `python3` when that is the Python 3 program on the host. On Linux, `chmod +x gpu-bench` once, then `./gpu-bench` is the same command. Nothing else needs to be installed. The command does not prompt, and it does not open a window or a browser.
+`list` prints the workloads, models, and schedulers. A workload name runs that workload with every scheduler. Add scheduler names to compare only those policies. The workload's own model is used unless you pass `--model`. A path works anywhere a name works.
+
+SSH in and run the same commands. Use `python3` when that is the Python 3 program on the host. On Linux, `chmod +x gpu-bench` once, then `./gpu-bench` is the same command. Nothing else needs to be installed. The menu and the typed commands print plain text. If the shell cannot ask questions, `python -m gpu_bench` compares every sample instead of opening the menu.
 
 ```
 ssh user@host
 cd /path/to/this/repo
-python -m gpu_bench list
-python -m gpu_bench mixed-lengths
+python -m gpu_bench
 ```
 
 ## Layout
