@@ -49,6 +49,17 @@ cd /path/to/this/repo
 python -m gpu_bench
 ```
 
+## Desktop
+
+On a machine with a screen:
+
+```
+pip install PySide6
+python -m gpu_bench gui
+```
+
+The window lists the files in `defaults/`. Pick one model, one workload, and any schedulers, then press Run. It shows the same latency table as the command line, and a bar for each request on the GPU. Change a choice and press Run again. The terminal commands do not need PySide6. An SSH session with no display keeps using the command line.
+
 ## Layout
 
 ```
@@ -56,7 +67,7 @@ defaults/
   workloads/    requests arriving over time
   models/       how long a model takes to run a request
   schedulers/   policies you can compare
-gpu_bench/      the comparison command
+gpu_bench/      the comparison command and desktop window
 ```
 
 ## Default files

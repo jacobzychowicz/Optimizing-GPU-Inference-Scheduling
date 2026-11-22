@@ -39,6 +39,8 @@ def dispatch(argv):
         return cmd_list(rest)
     if head == "run":
         return cmd_run(rest)
+    if head == "gui":
+        return _open_gui(rest)
     return cmd_run(argv)
 
 
@@ -69,6 +71,23 @@ def _open_menu(rest):
     from gpu_bench.menu import run_menu
 
     return run_menu()
+
+
+def _open_gui(rest):
+    prog = program_name()
+    if rest and rest[0] in ("-h", "--help"):
+        print(
+            f"usage: {prog} gui\n"
+            "\n"
+            "Open the desktop window. Install PySide6 first: pip install PySide6"
+        )
+        return 0
+    if rest:
+        print("error: gui takes no arguments", file=sys.stderr)
+        return 1
+    from gpu_bench.gui import main as gui_main
+
+    return gui_main()
 
 
 def cmd_list(argv):
@@ -211,7 +230,7 @@ def program_name():
 
 def top_help():
     prog = program_name()
-    return f"""usage: {prog} [menu|list|run] [name ...]
+    return f"""usage: {prog} [menu|list|run|gui] [name ...]
 
 In a terminal, `{prog}` opens a menu. Choose a model, a workload, and
 schedulers from the files in defaults/, then run. Option 5 is the typed
@@ -222,8 +241,10 @@ command line. Names and flags still run directly, with no menu.
   {prog} list
   {prog} token-mix --model example-llm
   {prog} run priority-mix -s fifo,aging
+  {prog} gui
 
-`{prog} run -h` explains each flag. With no terminal to answer, `{prog}`
+`{prog} run -h` explains each flag. `{prog} gui` opens the desktop window.
+With no terminal to answer, `{prog}`
 compares every sample workload on every sample scheduler.
 """
 

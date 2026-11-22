@@ -103,6 +103,7 @@ def run_schedule(jobs, select, model, scheduler_name):
         finished.append(
             {
                 "id": choice["id"],
+                "start_ms": start,
                 "latency_ms": finish - arrival,
                 "wait_ms": start - arrival,
                 "finish_ms": finish,
@@ -144,10 +145,11 @@ def model_for(workload, override):
     return MODELS / f"{name}.json"
 
 
-def compare(workload_path, model_path, schedulers):
-    """Return the text report for one workload.
+def comparison(workload_path, model_path, schedulers):
+    """Run one workload and return the workload, model, and per-scheduler results.
 
-    schedulers is a list of (display name, path) pairs, in the order to print.
+    schedulers is a list of (display name, path) pairs, in the order to report.
+    Each result has name, summary, and jobs. Each job has start_ms and finish_ms.
     """
     workload = load_json(workload_path)
     model = load_json(model_path)
@@ -159,12 +161,22 @@ def compare(workload_path, model_path, schedulers):
         missing = [key for key in ("id", "arrival_ms", "input") if key not in job]
         if missing:
             raise ValueError(f"job {job.get('id', '?')} in {label} is missing {', '.join(missing)}")
-    rows = []
+    results = []
     for name, path in schedulers:
         select = load_select(path)
         finished = run_schedule(jobs, select, model, name)
-        rows.append((name, summarize(finished)))
-    return format_report(workload, model, rows)
+        results.append({"name": name, "summary": summarize(finished), "jobs": finished})
+    return {"workload": workload, "model": model, "results": results}
+
+
+def compare(workload_path, model_path, schedulers):
+    """Return the text report for one workload.
+
+    schedulers is a list of (display name, path) pairs, in the order to print.
+    """
+    data = comparison(workload_path, model_path, schedulers)
+    rows = [(item["name"], item["summary"]) for item in data["results"]]
+    return format_report(data["workload"], data["model"], rows)
 
 
 def format_report(workload, model, rows):
