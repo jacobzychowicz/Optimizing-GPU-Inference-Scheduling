@@ -143,6 +143,64 @@ class StoreTests(TempHome):
         self.assertEqual(resolve("mine")["kind"], "workload")
 
 
+class PasswordTests(TempHome):
+    def setUp(self):
+        super().setUp()
+        self.vault = {}
+        self._orig = (store.get_saved_password, store.set_saved_password, store.forget_password, store.can_save_passwords)
+        store.get_saved_password = lambda name: self.vault.get(name)
+        store.set_saved_password = lambda name, pw: self.vault.__setitem__(name, pw)
+        store.forget_password = lambda name: self.vault.pop(name, None)
+        store.can_save_passwords = lambda: True
+        remote.get_saved_password = store.get_saved_password
+        remote.set_saved_password = store.set_saved_password
+
+    def tearDown(self):
+        (store.get_saved_password, store.set_saved_password, store.forget_password, store.can_save_passwords) = self._orig
+        remote.get_saved_password, remote.set_saved_password = self._orig[0], self._orig[1]
+        super().tearDown()
+
+    def test_password_never_written_to_hosts_file(self):
+        store.save_host({"name": "p", "host": "h", "auth": "password", "save_password": True, "password": "hunter2"})
+        text = (store.home() / "hosts.json").read_text()
+        self.assertNotIn("hunter2", text)
+        self.assertEqual(store.load_hosts()[0]["auth"], "password")
+
+    def test_key_hosts_never_ask(self):
+        host = store.normalize_host({"host": "h"})
+        self.assertIs(remote.with_password(host, lambda h: self.fail("asked")), host)
+
+    def test_ask_each_time_then_remember(self):
+        store.save_host({"name": "p", "host": "h", "auth": "password"})
+        host = store.find_host("p")
+        typed = remote.with_password(host, lambda h: ("pw1", False))
+        self.assertEqual((typed["password"], typed["password_source"]), ("pw1", "typed"))
+        self.assertEqual(self.vault, {})
+        remote.with_password(host, lambda h: ("pw2", True))
+        self.assertEqual(self.vault, {"p": "pw2"})
+        host = store.find_host("p")
+        self.assertTrue(host["save_password"])
+        saved = remote.with_password(host, lambda h: self.fail("asked again"))
+        self.assertEqual((saved["password"], saved["password_source"]), ("pw2", "saved"))
+
+    def test_cancel_prompt(self):
+        host = store.normalize_host({"host": "h", "auth": "password"})
+        with self.assertRaises(runner.Cancelled):
+            remote.with_password(host, lambda h: None)
+
+    def test_turning_off_save_and_removing_forget_password(self):
+        store.save_host({"name": "p", "host": "h", "auth": "password", "save_password": True})
+        self.vault["p"] = "pw"
+        store.save_host({"name": "p", "host": "h", "auth": "password", "save_password": False})
+        self.assertEqual(self.vault, {})
+        store.save_host({"name": "p", "host": "h", "auth": "password", "save_password": True})
+        self.vault["p"] = "pw"
+        store.save_host({"name": "q", "host": "h", "auth": "password", "save_password": True}, replace="p")
+        self.assertEqual(self.vault, {"q": "pw"})
+        store.remove_host("q")
+        self.assertEqual(self.vault, {})
+
+
 class RemoteTests(TempHome):
     def test_bundle_ships_backend_files(self):
         self.write("b.py", "def infer(s, j): pass\n")

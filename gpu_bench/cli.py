@@ -55,7 +55,24 @@ def dispatch(argv):
 
 
 def _terminal_can_prompt():
-    return sys.stdin.isatty() and sys.stdout.isatty()
+    return _stdin_is_console() and sys.stdout is not None and sys.stdout.isatty()
+
+
+def _stdin_is_console():
+    """True only when someone can type an answer. On Windows, NUL claims to be a tty, so ask the console."""
+    if sys.stdin is None or not sys.stdin.isatty():
+        return False
+    if sys.platform != "win32":
+        return True
+    try:
+        import ctypes
+        import msvcrt
+
+        handle = msvcrt.get_osfhandle(sys.stdin.fileno())
+        mode = ctypes.c_uint()
+        return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+    except (OSError, ValueError, AttributeError):
+        return False
 
 
 def _open_menu(rest):
@@ -225,7 +242,7 @@ def cmd_run(argv):
     if args.host:
         from gpu_bench.store import find_host
 
-        host = find_host(args.host)
+        host = prepare_host(find_host(args.host))
 
     from gpu_bench.runner import format_result
 
@@ -239,7 +256,9 @@ def cmd_run(argv):
             model_path = model_item["path"]
         else:
             model_path = model_for(load_json(workload_path), None)
-        results.append(run_anywhere(host, workload_path, model_path, chosen, args.mode, args.repeat, emit))
+        results.append(
+            with_trust(lambda: run_anywhere(host, workload_path, model_path, chosen, args.mode, args.repeat, emit))
+        )
 
     if args.events:
         return 0
@@ -276,6 +295,50 @@ def run_anywhere(host, workload_path, model_path, schedulers, mode, repeats, emi
     from gpu_bench.remote import run
 
     return run(host, workload_path, model_path, schedulers, mode, repeats, emit, cancel)
+
+
+def prepare_host(host):
+    """Attach the password for a password-login host, asking in the terminal if it isn't saved."""
+    from gpu_bench.remote import with_password
+
+    return with_password(host, _ask_password)
+
+
+def _ask_password(host):
+    import getpass
+    import os
+
+    from gpu_bench.store import describe_host
+
+    env = os.environ.get("GPU_BENCH_SSH_PASSWORD")
+    if env:
+        return env, False
+    if not _stdin_is_console():
+        raise ValueError(
+            f"{describe_host(host)} logs in with a password. Run this in a terminal to type it, "
+            "save it (hosts add NAME user@host --password --save-password), or set GPU_BENCH_SSH_PASSWORD."
+        )
+    password = getpass.getpass(f"Password for {describe_host(host)}: ")
+    if not password:
+        return None
+    return password, bool(host.get("save_password"))
+
+
+def with_trust(fn):
+    """Call fn. If a password host's server key is new, show its fingerprint and ask before trusting it."""
+    from gpu_bench.remote import UnknownHostKey, trust_host_key
+
+    while True:
+        try:
+            return fn()
+        except UnknownHostKey as exc:
+            if not _stdin_is_console():
+                raise RuntimeError(f"{exc}\nRun `hosts test NAME` in a terminal to confirm it.") from exc
+            print(str(exc), file=sys.stderr)
+            answer = input("Trust this server and continue? [y/N] ").strip().lower()
+            if answer not in ("y", "yes"):
+                raise RuntimeError("server not trusted; nothing was sent") from exc
+            trust_host_key(exc)
 
 
 def _event_printer():
@@ -322,7 +385,8 @@ def cmd_gpus(argv):
         from gpu_bench.remote import probe
         from gpu_bench.store import find_host
 
-        info = probe(find_host(args.host), check_torch=not args.no_torch)
+        host = prepare_host(find_host(args.host))
+        info = with_trust(lambda: probe(host, check_torch=not args.no_torch))
     else:
         from gpu_bench.gpus import probe
 
@@ -345,6 +409,7 @@ def cmd_hosts(argv):
         epilog=(
             "examples:\n"
             f"  {prog} hosts add gpu-box alice@10.0.0.5 --python /opt/venv/bin/python\n"
+            f"  {prog} hosts add lab bob@lab.example.edu --password --save-password\n"
             f"  {prog} hosts test gpu-box\n"
             f"  {prog} hosts remove gpu-box"
         ),
@@ -359,6 +424,10 @@ def cmd_hosts(argv):
     add.add_argument("--python", default="python3", help="Python on the server (default python3)")
     add.add_argument("--workdir", default=".gpu-bench", help="scratch folder on the server (default ~/.gpu-bench)")
     add.add_argument("-o", "--ssh-option", action="append", default=[], help="extra ssh -o Key=Value")
+    add.add_argument("--password", action="store_true",
+                     help="log in with a password instead of keys (asked for when connecting)")
+    add.add_argument("--save-password", action="store_true",
+                     help="with --password: ask for it now and keep it in the system credential store")
     remove = sub.add_parser("remove", help="forget a saved host")
     remove.add_argument("name")
     test = sub.add_parser("test", help="connect and show the server's GPUs")
@@ -373,9 +442,26 @@ def cmd_hosts(argv):
             print(f"No saved hosts. Add one with: {prog} hosts add NAME user@host")
             return 0
         for host in hosts:
-            print(f"  {host['name']:<16} {store.describe_host(host)}  python={host['python']}")
+            if host["auth"] == "password":
+                login = "password (saved)" if store.get_saved_password(host["name"]) else "password (asked each time)"
+            else:
+                login = "ssh keys"
+            print(f"  {host['name']:<16} {store.describe_host(host)}  login={login}  python={host['python']}")
         return 0
     if args.action == "add":
+        if args.save_password and not args.password:
+            raise ValueError("--save-password goes with --password")
+        if args.password and (args.key or args.ssh_option):
+            raise ValueError("--key and --ssh-option apply to key logins, not --password")
+        password = None
+        if args.save_password:
+            import getpass
+
+            if not store.can_save_passwords():
+                raise ValueError("this computer has no credential store to save passwords in. Leave out --save-password.")
+            password = getpass.getpass(f"Password for {args.target}: ")
+            if not password:
+                raise ValueError("no password typed")
         user, _, address = args.target.rpartition("@")
         host = store.save_host(
             {
@@ -387,8 +473,12 @@ def cmd_hosts(argv):
                 "python": args.python,
                 "workdir": args.workdir,
                 "ssh_options": args.ssh_option,
+                "auth": "password" if args.password else "key",
+                "save_password": args.save_password,
             }
         )
+        if password is not None:
+            store.set_saved_password(host["name"], password)
         print(f"saved {host['name']} ({store.describe_host(host)}). Check it with: {prog} hosts test {host['name']}")
         return 0
     if args.action == "remove":
@@ -399,9 +489,9 @@ def cmd_hosts(argv):
         from gpu_bench.gpus import format_probe
         from gpu_bench.remote import probe
 
-        host = store.find_host(args.name)
+        host = prepare_host(store.find_host(args.name))
         print(f"connecting to {store.describe_host(host)} ...", file=sys.stderr)
-        print(format_probe(probe(host)))
+        print(format_probe(with_trust(lambda: probe(host))))
         return 0
     return 1
 

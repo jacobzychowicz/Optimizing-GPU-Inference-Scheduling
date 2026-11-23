@@ -5,12 +5,15 @@ package and the chosen workload, model, and scheduler files to the server in one
 SSH connection, runs there, streams progress back as JSON lines, and removes the
 files it sent when the run ends.
 
-Authentication is whatever your `ssh` command already uses: keys, an agent, or
-entries in ~/.ssh/config. Password prompts cannot be answered from here, so set
-up a key first (ssh-copy-id user@host).
+A host logs in one of two ways:
+  key       your `ssh` command, so keys, an agent, and ~/.ssh/config all work.
+  password  a password typed when connecting or saved in the system credential
+            store. This goes through paramiko instead of the ssh command, and
+            new servers are confirmed by fingerprint (trust on first use).
 """
 
 import base64
+import hashlib
 import io
 import json
 import os
@@ -27,7 +30,151 @@ from pathlib import Path
 
 from gpu_bench.compare import load_json
 from gpu_bench.gpus import quiet_popen_kwargs
-from gpu_bench.store import describe_host
+from gpu_bench.store import describe_host, forget_password, get_saved_password, known_hosts_path, set_saved_password
+
+
+class UnknownHostKey(RuntimeError):
+    """A password host whose server key has not been seen before. Confirm, then trust_host_key()."""
+
+    def __init__(self, host, lookup_name, key):
+        self.host = host
+        self.lookup_name = lookup_name
+        self.key = key
+        self.key_type = key.get_name()
+        digest = hashlib.sha256(key.asbytes()).digest()
+        self.fingerprint = "SHA256:" + base64.b64encode(digest).decode("ascii").rstrip("=")
+        super().__init__(
+            f"{describe_host(host)} is a server this app has not connected to before.\n"
+            f"Its {self.key_type} key fingerprint is {self.fingerprint}.\n"
+            "Check it with the server's admin (ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub) before trusting it."
+        )
+
+
+class AuthFailed(RuntimeError):
+    """The server rejected the user name or password."""
+
+
+def uses_password(host):
+    return host.get("auth") == "password"
+
+
+def with_password(host, ask):
+    """Return a copy of host carrying its password, asking for it when needed.
+
+    ask(host) returns (password, remember) or None to cancel. Hosts that log in
+    with keys come back unchanged.
+    """
+    from gpu_bench.runner import Cancelled
+
+    if not uses_password(host) or host.get("password") is not None:
+        return host
+    saved = get_saved_password(host["name"]) if host.get("save_password") else None
+    if saved:
+        return dict(host, password=saved, password_source="saved")
+    answer = ask(host)
+    if answer is None:
+        raise Cancelled("stopped")
+    password, remember = answer
+    if remember:
+        remember_password(host, password)
+    return dict(host, password=password, password_source="typed")
+
+
+def remember_password(host, password):
+    """Save the password and mark a saved host to use it from now on."""
+    from gpu_bench.store import load_hosts, save_host
+
+    for saved in load_hosts():
+        if saved["name"] == host["name"] and not saved["save_password"]:
+            save_host(dict(saved, save_password=True))
+    set_saved_password(host["name"], password)
+
+
+def trust_host_key(exc):
+    """Remember the server key from an UnknownHostKey so later connections accept it."""
+    paramiko = _paramiko()
+    path = known_hosts_path()
+    keys = paramiko.HostKeys()
+    if path.exists():
+        keys.load(str(path))
+    keys.add(exc.lookup_name, exc.key.get_name(), exc.key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    keys.save(str(path))
+
+
+def _paramiko():
+    try:
+        import paramiko
+    except ImportError as exc:
+        raise RuntimeError(
+            "password logins need the paramiko package: pip install paramiko. "
+            "Or switch this host to key login."
+        ) from exc
+    import logging
+
+    logger = logging.getLogger("paramiko")
+    if not logger.handlers:
+        logger.setLevel(logging.CRITICAL)  # errors reach the user as exceptions instead
+    return paramiko
+
+
+def _connect(host):
+    import getpass
+    import socket
+
+    paramiko = _paramiko()
+    if host.get("password") is None:
+        raise RuntimeError(f"{describe_host(host)} logs in with a password, and none was given")
+    client = paramiko.SSHClient()
+    try:
+        client.load_system_host_keys()
+    except (OSError, paramiko.SSHException):
+        pass
+    if known_hosts_path().exists():
+        try:
+            client.load_host_keys(str(known_hosts_path()))
+        except (OSError, paramiko.SSHException):
+            pass
+
+    class AskFirst(paramiko.MissingHostKeyPolicy):
+        def missing_host_key(self, _client, hostname, key):
+            raise UnknownHostKey(host, hostname, key)
+
+    client.set_missing_host_key_policy(AskFirst())
+    dest = describe_host(host)
+    try:
+        client.connect(
+            hostname=host["host"],
+            port=int(host.get("port") or 22),
+            username=host.get("user") or getpass.getuser(),
+            password=host["password"],
+            allow_agent=False,
+            look_for_keys=False,
+            timeout=15,
+            banner_timeout=20,
+            auth_timeout=30,
+        )
+    except UnknownHostKey:
+        client.close()
+        raise
+    except paramiko.BadHostKeyException as exc:
+        client.close()
+        raise RuntimeError(
+            f"WARNING: the key of {dest} has CHANGED since you trusted it. Someone could be intercepting the "
+            "connection, or the server was reinstalled. If you know why it changed, remove its line from "
+            f"{known_hosts_path()} (or ~/.ssh/known_hosts) and connect again."
+        ) from exc
+    except paramiko.AuthenticationException as exc:
+        client.close()
+        message = f"{dest} rejected the user name or password."
+        if host.get("password_source") == "saved":
+            forget_password(host["name"])
+            message += " The saved password was removed, so you will be asked for it next time."
+        raise AuthFailed(message) from exc
+    except (paramiko.SSHException, OSError, socket.timeout, EOFError) as exc:
+        client.close()
+        raise RuntimeError(f"cannot connect to {dest}: {exc}") from exc
+    return client
 
 PACKAGE = Path(__file__).resolve().parent
 
@@ -174,6 +321,8 @@ def _bundle_backend_files(model, model_path, add_bytes):
 
 def _stream(host, gpu_bench_args, bundle, on_line, cancel=None):
     """Run gpu-bench on the server. Calls on_line for each stdout line. Returns (code, stderr tail)."""
+    if uses_password(host):
+        return _stream_password(host, gpu_bench_args, bundle, on_line, cancel)
     command = ssh_command(host, remote_command(host, gpu_bench_args))
     try:
         proc = subprocess.Popen(
@@ -214,6 +363,51 @@ def _stream(host, gpu_bench_args, bundle, on_line, cancel=None):
     for thread in threads:
         thread.join(timeout=2)
     return proc.returncode, list(stderr)
+
+
+def _stream_password(host, gpu_bench_args, bundle, on_line, cancel=None):
+    client = _connect(host)
+    stderr = deque(maxlen=60)
+    try:
+        channel = client.get_transport().open_session()
+        channel.exec_command(remote_command(host, gpu_bench_args))
+        out = channel.makefile("rb")
+        err = channel.makefile_stderr("rb")
+
+        def feed():
+            try:
+                channel.sendall(bundle)
+                channel.shutdown_write()
+            except (OSError, EOFError):
+                pass
+
+        def drain():
+            try:
+                for raw in err:
+                    stderr.append(raw.decode("utf-8", "replace").rstrip())
+            except (OSError, EOFError):
+                pass
+
+        def watch():
+            while not channel.exit_status_ready() and not channel.closed:
+                if cancel is not None and cancel.wait(0.2):
+                    client.close()
+                    return
+
+        threads = [threading.Thread(target=fn, daemon=True) for fn in (feed, drain, watch)]
+        for thread in threads:
+            thread.start()
+        try:
+            for raw in out:
+                on_line(raw.decode("utf-8", "replace").rstrip("\r\n"))
+        except (OSError, EOFError):
+            pass
+        code = channel.recv_exit_status() if channel.exit_status_ready() or not channel.closed else -1
+        for thread in threads:
+            thread.join(timeout=2)
+        return code, list(stderr)
+    finally:
+        client.close()
 
 
 def explain_failure(host, code, stderr):

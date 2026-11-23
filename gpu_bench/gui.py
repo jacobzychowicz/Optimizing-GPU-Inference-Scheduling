@@ -6,12 +6,13 @@ import traceback
 from pathlib import Path
 
 try:
-    from PySide6.QtCore import QThread, Qt, Signal
+    from PySide6.QtCore import QThread, Qt, QTimer, Signal
     from PySide6.QtGui import QColor, QPainter, QPen
     from PySide6.QtWidgets import (
         QAbstractItemView,
         QApplication,
         QButtonGroup,
+        QCheckBox,
         QComboBox,
         QDialog,
         QDialogButtonBox,
@@ -73,6 +74,7 @@ if Qt is not None:
         event = Signal(object)
         done = Signal(object)
         failed = Signal(str)
+        needs_trust = Signal(object)
 
         def __init__(self, fn, parent=None):
             super().__init__(parent)
@@ -80,10 +82,13 @@ if Qt is not None:
             self.cancel = threading.Event()
 
         def run(self):
+            from gpu_bench.remote import UnknownHostKey
             from gpu_bench.runner import Cancelled
 
             try:
                 result = self.fn(self.event.emit, self.cancel)
+            except UnknownHostKey as exc:
+                self.needs_trust.emit(exc)
             except Cancelled:
                 self.failed.emit("Stopped.")
             except (OSError, ValueError, RuntimeError, KeyError) as exc:
@@ -92,6 +97,78 @@ if Qt is not None:
                 self.failed.emit(traceback.format_exc())
             else:
                 self.done.emit(result)
+
+    class PasswordDialog(QDialog):
+        """Asks for an SSH password, with an option to keep it in the credential store."""
+
+        def __init__(self, parent, host, remember_default=False):
+            super().__init__(parent)
+            from gpu_bench.store import can_save_passwords, describe_host
+
+            self.setWindowTitle("SSH password")
+            self.password = QLineEdit()
+            self.password.setEchoMode(QLineEdit.EchoMode.Password)
+            self.remember = QCheckBox("Remember this password")
+            if can_save_passwords():
+                self.remember.setChecked(remember_default)
+                self.remember.setToolTip("Kept in your system's credential store (Windows Credential Manager), not in a file.")
+            else:
+                self.remember.setEnabled(False)
+                self.remember.setToolTip("No credential store is available on this computer.")
+            buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+            buttons.accepted.connect(self.accept)
+            buttons.rejected.connect(self.reject)
+            layout = QVBoxLayout(self)
+            layout.addWidget(QLabel(f"Password for <b>{describe_host(host)}</b>"))
+            layout.addWidget(self.password)
+            layout.addWidget(self.remember)
+            layout.addWidget(buttons)
+            self.password.setFocus()
+
+    def ask_password(parent, host):
+        """(password, remember) or None. Matches remote.with_password's ask()."""
+        dialog = PasswordDialog(parent, host, bool(host.get("save_password")))
+        if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.password.text():
+            return None
+        return dialog.password.text(), dialog.remember.isChecked()
+
+    def prepare_host(parent, host):
+        """The host with its password attached, asking if needed. None if the user cancelled."""
+        if host is None:
+            return None
+        from gpu_bench.remote import uses_password, with_password
+        from gpu_bench.runner import Cancelled
+
+        # A typed password is reused for the rest of the session (only in memory).
+        session = getattr(parent, "session_passwords", None)
+        if session is not None and uses_password(host) and host["name"] in session:
+            return dict(host, password=session[host["name"]], password_source="typed")
+        try:
+            prepared = with_password(host, lambda h: ask_password(parent, h))
+            if session is not None and prepared.get("password_source") == "typed":
+                session[host["name"]] = prepared["password"]
+            return prepared
+        except Cancelled:
+            return False
+        except ValueError as exc:
+            QMessageBox.warning(parent, "Password not saved", str(exc))
+            return False
+
+    def confirm_trust(parent, exc):
+        """Show a new server's fingerprint. True if the user trusts it (and it is saved)."""
+        from gpu_bench.remote import trust_host_key
+
+        box = QMessageBox(parent)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("New server")
+        box.setText(str(exc))
+        box.setInformativeText("Trust this server and connect?")
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            return False
+        trust_host_key(exc)
+        return True
 
     class Timeline(QWidget):
         """One lane per scheduler. Each bar is a request on the GPU. Hover a bar for details."""
@@ -206,13 +283,32 @@ if Qt is not None:
             self.workdir.setPlaceholderText(".gpu-bench (inside your home folder)")
             self.options = QLineEdit()
             self.options.setPlaceholderText("optional, comma separated: ProxyJump=bastion, IdentitiesOnly=yes")
+            self.auth = QComboBox()
+            self.auth.addItem("SSH key / agent", "key")
+            self.auth.addItem("Password", "password")
+            self.auth.currentIndexChanged.connect(self._auth_changed)
+            self.password = QLineEdit()
+            self.password.setEchoMode(QLineEdit.EchoMode.Password)
+            from gpu_bench.store import can_save_passwords
+
+            self.save_password = QCheckBox("Save password (Windows Credential Manager)")
+            if not can_save_passwords():
+                self.save_password.setEnabled(False)
+                self.save_password.setToolTip("No credential store is available, so the password is asked for each time.")
+            self.save_password.toggled.connect(self._auth_changed)
 
             form = QFormLayout()
             form.addRow("Name", self.name)
             form.addRow("Host", self.host)
             form.addRow("User", self.user)
             form.addRow("Port", self.port)
+            form.addRow("Login", self.auth)
+            form.addRow("Password", self.password)
+            form.addRow("", self.save_password)
             form.addRow("Key file", key_row)
+            self.browse = browse
+            self.form = form
+            self.key_row = key_row
             form.addRow("Python", self.python)
             form.addRow("Scratch folder", self.workdir)
             form.addRow("ssh options", self.options)
@@ -229,8 +325,8 @@ if Qt is not None:
             self.output = QPlainTextEdit()
             self.output.setReadOnly(True)
             self.output.setPlaceholderText(
-                "Login uses your normal ssh setup (keys, agent, ~/.ssh/config). Password prompts can't be "
-                "answered here, so run ssh-copy-id user@host once if you log in with a password. "
+                "SSH key / agent uses your normal ssh setup (keys, agent, ~/.ssh/config). "
+                "Password asks for the password when you connect, or uses the saved one. "
                 "The server only needs Python 3.8+."
             )
 
@@ -279,6 +375,10 @@ if Qt is not None:
             self.python.setText(host["python"])
             self.workdir.setText(host["workdir"])
             self.options.setText(", ".join(host["ssh_options"]))
+            self.auth.setCurrentIndex(max(0, self.auth.findData(host["auth"])))
+            self.save_password.setChecked(host["save_password"])
+            self.password.clear()
+            self._auth_changed()
 
         def _new(self):
             self._editing = None
@@ -287,7 +387,27 @@ if Qt is not None:
                 field.clear()
             self.python.setText("python3")
             self.workdir.setText(".gpu-bench")
+            self.auth.setCurrentIndex(0)
+            self.save_password.setChecked(False)
+            self.password.clear()
+            self._auth_changed()
             self.host.setFocus()
+
+        def _auth_changed(self, *_args):
+            from gpu_bench.store import get_saved_password
+
+            password = self.auth.currentData() == "password"
+            self.form.setRowVisible(self.password, password)
+            self.form.setRowVisible(self.save_password, password)
+            self.form.setRowVisible(self.key_row, not password)
+            self.form.setRowVisible(self.options, not password)
+            has_saved = bool(self._editing and get_saved_password(self._editing))
+            if not self.save_password.isChecked():
+                self.password.setPlaceholderText("used for Test connection only; asked for each time you connect")
+            elif has_saved:
+                self.password.setPlaceholderText("saved. Type a new one to replace it")
+            else:
+                self.password.setPlaceholderText("type it to save it, or leave blank to be asked once")
 
         def _form(self):
             return {
@@ -299,18 +419,32 @@ if Qt is not None:
                 "python": self.python.text().strip(),
                 "workdir": self.workdir.text().strip(),
                 "ssh_options": [part.strip() for part in self.options.text().split(",") if part.strip()],
+                "auth": self.auth.currentData(),
+                "save_password": self.save_password.isChecked(),
             }
 
         def _save(self):
-            from gpu_bench.store import save_host
+            from gpu_bench.store import save_host, set_saved_password
 
+            form = self._form()
+            if form["auth"] == "password":
+                form["ssh_options"] = []
+                form["key"] = ""
             try:
-                host = save_host(self._form(), replace=self._editing)
+                host = save_host(form, replace=self._editing)
+                typed = self.password.text()
+                if host["save_password"] and typed:
+                    set_saved_password(host["name"], typed)
             except ValueError as exc:
                 QMessageBox.warning(self, "Can't save host", str(exc))
                 return None
             self._refresh(host["name"])
-            self.output.setPlainText(f"Saved {host['name']}.")
+            note = ""
+            if host["auth"] == "password":
+                note = " The password is saved in Windows Credential Manager." if host["save_password"] and typed else (
+                    " You'll be asked for the password when connecting." if not host["save_password"]
+                    else "")
+            self.output.setPlainText(f"Saved {host['name']}.{note}")
             return host
 
         def _delete(self):
@@ -329,13 +463,31 @@ if Qt is not None:
                 self.key.setText(path)
 
         def _test(self):
-            from gpu_bench.store import normalize_host
+            from gpu_bench.store import get_saved_password, normalize_host
 
             try:
                 host = normalize_host(self._form())
             except ValueError as exc:
                 self.output.setPlainText(str(exc))
                 return
+            if host["auth"] == "password":
+                typed = self.password.text()
+                saved = get_saved_password(self._editing) if self._editing and host["save_password"] else None
+                if typed:
+                    host["password"] = typed
+                elif saved:
+                    host.update(password=saved, password_source="saved", name=self._editing)
+                else:
+                    answer = ask_password(self, host)
+                    if answer is None:
+                        return
+                    host["password"] = answer[0]
+                    if answer[1]:
+                        self.password.setText(answer[0])
+                        self.save_password.setChecked(True)
+            self._run_test(host)
+
+        def _run_test(self, host):
             from gpu_bench.gpus import format_probe
             from gpu_bench.remote import probe
             from gpu_bench.store import describe_host
@@ -345,8 +497,15 @@ if Qt is not None:
             self._task = Task(lambda _emit, _cancel: probe(host), self)
             self._task.done.connect(lambda info: self.output.setPlainText("Connected.\n\n" + format_probe(info)))
             self._task.failed.connect(self.output.setPlainText)
+            self._task.needs_trust.connect(lambda exc: self._trust_and_retry(exc, host))
             self._task.finished.connect(lambda: self.test.setEnabled(True))
             self._task.start()
+
+        def _trust_and_retry(self, exc, host):
+            if confirm_trust(self, exc):
+                self._run_test(host)
+            else:
+                self.output.setPlainText("Not connected: the server was not trusted.")
 
         def reject(self):
             if self._task is not None and self._task.isRunning():
@@ -360,6 +519,7 @@ if Qt is not None:
             from gpu_bench.store import load_settings
 
             self.settings = load_settings()
+            self.session_passwords = {}
             self.task = None
             self.probe_task = None
             self.result = None
@@ -690,12 +850,15 @@ if Qt is not None:
             current = self._current_host()
             dialog = HostDialog(self, current["name"] if current else None)
             dialog.exec()
+            self.session_passwords.clear()  # passwords may have changed in the dialog
             self._reload_hosts(self.settings.get("host"))
 
         def _probe(self):
             if self.probe_task is not None and self.probe_task.isRunning():
                 return
-            host = self._current_host()
+            host = prepare_host(self, self._current_host())
+            if host is False:
+                return
             if host is None:
                 from gpu_bench.gpus import probe
 
@@ -711,6 +874,7 @@ if Qt is not None:
             task = Task(fn, self)
             task.done.connect(self._probe_done)
             task.failed.connect(self._probe_failed)
+            task.needs_trust.connect(lambda exc: self._trust_then(exc, self._probe, "Not connected: server not trusted."))
             task.finished.connect(lambda: self.check.setEnabled(True))
             self.probe_task = task
             task.start()
@@ -726,7 +890,13 @@ if Qt is not None:
             self.gpu_label.setToolTip(format_probe(info))
             self._log(format_probe(info))
 
+        def _forget_session_password(self, message):
+            host = self._current_host()
+            if host and "rejected the user name or password" in message:
+                self.session_passwords.pop(host["name"], None)
+
         def _probe_failed(self, message):
+            self._forget_session_password(message)
             self.gpu_label.setText("Couldn't check GPUs. See the Log tab.")
             self._log(message)
 
@@ -757,7 +927,10 @@ if Qt is not None:
 
             mode = self._mode()
             repeats = self.repeats.value() if mode == "live" else 1
-            host = self._current_host()
+            host = prepare_host(self, self._current_host())
+            if host is False:
+                self.status.setText("Run cancelled.")
+                return
             self.settings["repeats"] = self.repeats.value()
             self._save_settings()
             schedulers = [(item["name"], item["path"]) for item in chosen]
@@ -785,6 +958,9 @@ if Qt is not None:
             self.task.event.connect(self._on_event)
             self.task.done.connect(self._run_done)
             self.task.failed.connect(self._run_failed)
+            self.task.needs_trust.connect(
+                lambda exc: self._trust_then(exc, self.run_comparison, "Run cancelled: server not trusted.")
+            )
             self.task.finished.connect(self._run_finished)
             self.run_btn.setEnabled(False)
             self.stop_btn.setEnabled(True)
@@ -822,6 +998,17 @@ if Qt is not None:
                 message or "Waiting for the first request to finish...",
             )
 
+        def _trust_then(self, exc, retry, refused):
+            self.progress.setRange(0, 1)
+            self.progress.setValue(0)
+            if confirm_trust(self, exc):
+                # let the finished task release its buttons before starting again
+                QTimer.singleShot(0, retry)
+            else:
+                self.status.setText(refused)
+                if retry == self._probe:
+                    self.gpu_label.setText(refused)
+
         def _run_done(self, result):
             from gpu_bench.store import save_run
 
@@ -837,6 +1024,7 @@ if Qt is not None:
             self.status.setText(f"Done: {result['workload']['name']} on {result['model']['name']} ({result['mode']}).")
 
         def _run_failed(self, message):
+            self._forget_session_password(message)
             self.progress.setRange(0, 1)
             self.progress.setValue(0)
             self._log(message)

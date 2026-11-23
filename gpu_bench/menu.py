@@ -168,23 +168,26 @@ def _execute(state, read_line):
         if not item["path"].is_file():
             return f"The scheduler file {item['name']} is no longer in the folder. Choose schedulers again."
 
-    from gpu_bench.cli import _progress_printer, run_anywhere
-    from gpu_bench.runner import format_result
+    from gpu_bench.cli import _progress_printer, prepare_host, run_anywhere, with_trust
+    from gpu_bench.runner import Cancelled, format_result
 
     _clear()
     chosen = [(item["name"], item["path"]) for item in state["schedulers"]]
     try:
-        result = run_anywhere(
-            state["host"],
-            state["workload"]["path"],
-            state["model"]["path"],
-            chosen,
-            state["mode"],
-            1,
-            _progress_printer(state["mode"], state["host"]),
+        host = prepare_host(state["host"]) if state["host"] else None
+        result = with_trust(
+            lambda: run_anywhere(
+                host,
+                state["workload"]["path"],
+                state["model"]["path"],
+                chosen,
+                state["mode"],
+                1,
+                _progress_printer(state["mode"], host),
+            )
         )
         print(format_result(result))
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, Cancelled):
         print()
         print("stopped")
         note = "Run stopped."

@@ -42,7 +42,7 @@ pip install PySide6
 python -m gpu_bench gui
 ```
 
-- **Run on** — *This computer* or any saved SSH host. *Manage hosts...* adds, edits, and tests hosts. *Check GPUs* shows the GPUs, driver, and PyTorch on the chosen machine.
+- **Run on** — *This computer* or any saved SSH host. *Manage hosts...* adds, edits, and tests hosts, with key or password login. A password that isn't saved is asked for once per session. *Check GPUs* shows the GPUs, driver, and PyTorch on the chosen machine.
 - **Mode** — *Simulate* or *Live on GPU*, and how many repeats to average for live runs.
 - Pick a workload (its usual model is selected for you), a model, and schedulers. *Add your own file...* adds a workload, model, or scheduler from anywhere on disk; it stays in the lists next time.
 - **Run** works in the background, with a progress bar and the timeline filling in as requests finish. **Stop** ends a live run after the current request.
@@ -88,19 +88,30 @@ A path works anywhere a name works. `python -m gpu_bench run -h` lists every fla
 
 ## SSH hosts
 
-Login uses your normal `ssh` command, so keys, `ssh-agent`, and `~/.ssh/config` (aliases, `ProxyJump`, ...) all work. Password prompts can't be answered by the app; if you log in with a password, run `ssh-copy-id user@host` once. The first time you connect to a new server, run `ssh user@host` in a terminal once to accept its host key.
+A host logs in one of two ways:
+
+- **SSH key / agent** (default) — uses your normal `ssh` command, so keys, `ssh-agent`, and `~/.ssh/config` (aliases, `ProxyJump`, ...) all work. The first time you connect to a new server, run `ssh user@host` in a terminal once to accept its host key.
+- **Password** — you type the password. Either it's asked for each time you connect, or tick *Save password* and it's kept in your system's credential store (Windows Credential Manager, macOS Keychain, Linux Secret Service) — never in a file. If the server rejects a saved password, it is removed and you're asked again. The first connection to a new server shows its key fingerprint and asks whether to trust it; trusted keys go in `~/.gpu_bench/known_hosts`, and a key that later changes is refused with a warning. Password logins use the `paramiko` package (`pip install paramiko keyring`; both are built into the .exe).
+
+```
+python -m gpu_bench hosts add lab bob@lab.example.edu --password                   # ask each time
+python -m gpu_bench hosts add lab bob@lab.example.edu --password --save-password   # ask now, save it
+```
+
+In scripts with no terminal, set `GPU_BENCH_SSH_PASSWORD` instead of typing it.
 
 A host has:
 
 | Field | Meaning |
 | --- | --- |
 | host, user, port | Where to connect. host can be an alias from `~/.ssh/config`. |
-| key | Private key file, if not your default. |
+| login | SSH key / agent, or password (asked each time, or saved in the credential store). |
+| key | Private key file, if not your default (key login only). |
 | python | The Python to run on the server. Used as written, so `/opt/venv/bin/python` or `conda run -n infer python` work. |
 | scratch folder | Where a run's files go on the server (default `~/.gpu-bench`). Each run uses its own subfolder and deletes it at the end. |
-| ssh options | Extra `-o Key=Value` options. |
+| ssh options | Extra `-o Key=Value` options (key login only). |
 
-Windows needs the OpenSSH client (Settings > Optional features). The server should be Linux or macOS.
+Key logins on Windows need the OpenSSH client (Settings > Optional features). The server should be Linux or macOS.
 
 ## Models and backends
 

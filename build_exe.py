@@ -1,6 +1,6 @@
 """Build GPU-Inference-Scheduler.exe with PyInstaller.
 
-    pip install pyinstaller PySide6
+    pip install pyinstaller PySide6 paramiko keyring
     python build_exe.py
 
 The .exe opens the desktop window. defaults/ and the gpu_bench sources are bundled
@@ -39,6 +39,11 @@ def main():
         "--add-data", f"{ROOT / 'defaults'}{SEP}defaults",
         "--add-data", f"{ROOT / 'gpu_bench'}{SEP}gpu_bench",
         "--hidden-import", "gpu_bench.gui",
+        # password logins: SSH client and the credential store backends
+        "--hidden-import", "paramiko",
+        "--collect-submodules", "keyring.backends",
+        "--hidden-import", "win32ctypes.core",
+        "--copy-metadata", "keyring",
     ]
     for module in EXCLUDES:
         args += ["--exclude-module", module]

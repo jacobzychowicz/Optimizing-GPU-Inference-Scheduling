@@ -69,6 +69,9 @@ def normalize_host(raw):
         "python": str(raw.get("python") or "python3").strip() or "python3",
         "workdir": str(raw.get("workdir") or ".gpu-bench").strip() or ".gpu-bench",
         "ssh_options": [str(opt).strip() for opt in (raw.get("ssh_options") or []) if str(opt).strip()],
+        # "key": your ssh command, keys, agent, ~/.ssh/config. "password": typed or saved password.
+        "auth": "password" if raw.get("auth") == "password" else "key",
+        "save_password": bool(raw.get("save_password")) and raw.get("auth") == "password",
     }
     if not host["host"]:
         raise ValueError("a host needs a hostname or address")
@@ -107,8 +110,18 @@ def load_hosts():
 
 
 def save_host(raw, replace=None):
-    """Add or update a host. replace is the old name when renaming."""
+    """Add or update a host. replace is the old name when renaming.
+
+    A password is never written here; see set_saved_password.
+    """
     host = normalize_host(raw)
+    if replace and replace != host["name"]:
+        saved = get_saved_password(replace)
+        forget_password(replace)
+        if saved and host["save_password"]:
+            set_saved_password(host["name"], saved)
+    if not host["save_password"]:
+        forget_password(host["name"])
     hosts = [item for item in load_hosts() if item["name"] not in {host["name"], replace}]
     hosts.append(host)
     hosts.sort(key=lambda item: item["name"].lower())
@@ -122,6 +135,69 @@ def remove_host(name):
     if len(kept) == len(hosts):
         raise ValueError(f"no saved host named '{name}'")
     _write(home() / "hosts.json", {"hosts": kept})
+    forget_password(name)
+
+
+# saved passwords ----------------------------------------------------------
+# Kept in the operating system's credential store (Windows Credential Manager,
+# macOS Keychain, Secret Service on Linux) through the keyring package, never in
+# hosts.json. Without keyring, passwords can only be typed at each connection.
+
+_SERVICE = "gpu-bench-ssh"
+
+
+def _keyring():
+    try:
+        import keyring
+        from keyring.backends import fail
+    except ImportError:
+        return None
+    try:
+        backend = keyring.get_keyring()
+    except Exception:
+        return None
+    if isinstance(backend, fail.Keyring):
+        return None
+    return keyring
+
+
+def _account(name):
+    # GPU_BENCH_HOME separates test or portable setups from the main one.
+    return f"{home().resolve()}::{name}"
+
+
+def can_save_passwords():
+    return _keyring() is not None
+
+
+def get_saved_password(name):
+    keyring = _keyring()
+    if keyring is None or not name:
+        return None
+    try:
+        return keyring.get_password(_SERVICE, _account(name))
+    except Exception:
+        return None
+
+
+def set_saved_password(name, password):
+    keyring = _keyring()
+    if keyring is None:
+        raise ValueError("passwords can't be saved on this computer (no credential store). Type it when connecting.")
+    try:
+        keyring.set_password(_SERVICE, _account(name), password)
+    except Exception as exc:
+        raise ValueError(f"could not save the password: {exc}") from exc
+
+
+def forget_password(name):
+    keyring = _keyring()
+    if keyring is None or not name:
+        return
+    try:
+        keyring.delete_password(_SERVICE, _account(name))
+    except Exception:
+        pass
 
 
 def parse_target(text):
@@ -132,6 +208,11 @@ def parse_target(text):
     if rest.count(":") == 1:
         rest, port = rest.split(":")
     return normalize_host({"name": re.sub(r"[^A-Za-z0-9._-]", "_", text), "host": rest, "user": user, "port": port})
+
+
+def known_hosts_path():
+    """Server keys you trusted for password logins (key logins use ~/.ssh/known_hosts)."""
+    return home() / "known_hosts"
 
 
 def find_host(token):
