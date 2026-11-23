@@ -7,9 +7,26 @@ from pathlib import Path
 from gpu_bench.compare import MODELS, SCHEDULERS, WORKLOADS, load_json
 
 
+def _files(folder, kind, pattern):
+    """Sample files first, then your own from ~/.gpu_bench/<kind>. A name in both uses yours."""
+    from gpu_bench.store import user_dir
+
+    found = {}
+    for base in (folder, user_dir(kind)):
+        try:
+            paths = sorted(base.glob(pattern))
+        except OSError:
+            continue
+        for path in paths:
+            if path.name.startswith("_"):
+                continue
+            found[path.stem] = path
+    return [found[name] for name in sorted(found)]
+
+
 def workload_items():
     items = []
-    for path in sorted(WORKLOADS.glob("*.json")):
+    for path in _files(WORKLOADS, "workloads", "*.json"):
         data = load_json(path)
         items.append(
             {
@@ -26,7 +43,7 @@ def workload_items():
 
 def model_items():
     items = []
-    for path in sorted(MODELS.glob("*.json")):
+    for path in _files(MODELS, "models", "*.json"):
         data = load_json(path)
         items.append(
             {
@@ -43,7 +60,7 @@ def model_items():
 
 def scheduler_items():
     items = []
-    for path in sorted(path for path in SCHEDULERS.glob("*.py") if not path.name.startswith("_")):
+    for path in _files(SCHEDULERS, "schedulers", "*.py"):
         items.append(
             {
                 "kind": "scheduler",
@@ -93,7 +110,8 @@ def item_from_file(path):
         }
     if path.suffix == ".json":
         data = load_json(path)
-        if "jobs" in data and "runtime" in data:
+        is_model = "runtime" in data or "backend" in data
+        if "jobs" in data and is_model:
             raise ValueError(f"{path} looks like both a workload and a model")
         if "jobs" in data:
             return {
@@ -104,7 +122,7 @@ def item_from_file(path):
                 "description": first_sentence(data.get("description", "")),
                 "model": data.get("model") or "",
             }
-        if "runtime" in data:
+        if is_model:
             return {
                 "kind": "model",
                 "name": data.get("name") or path.stem,

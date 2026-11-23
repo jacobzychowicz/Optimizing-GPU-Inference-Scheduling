@@ -4,7 +4,7 @@ import shlex
 import sys
 
 from gpu_bench.catalog import model_items, scheduler_items, workload_items
-from gpu_bench.compare import MODELS, ROOT, SCHEDULERS, WORKLOADS, compare
+from gpu_bench.compare import MODELS, ROOT, SCHEDULERS, WORKLOADS
 
 
 WIDTH = 72
@@ -19,7 +19,7 @@ def run_menu(read_line=None):
     if read_line is None:
         read_line = input
     _enable_ansi()
-    state = {"model": None, "workload": None, "schedulers": []}
+    state = {"model": None, "workload": None, "schedulers": [], "mode": "simulate", "host": None}
     note = "Change any choice before you run."
     while True:
         try:
@@ -64,12 +64,17 @@ def run_menu(read_line=None):
                 note = _execute(state, read_line)
             elif choice == "5":
                 note = _legacy(read_line)
+            elif choice == "6":
+                state["mode"] = "live" if state["mode"] == "simulate" else "simulate"
+                note = f"Mode: {_mode_label(state['mode'])}"
+            elif choice == "7":
+                note = _pick_host(state, read_line)
             elif choice in {"q", "quit", "exit"}:
                 return 0
             elif choice == "":
-                note = "Type 1, 2, 3, 4, 5, or q."
+                note = "Type 1 to 7, or q."
             else:
-                note = "Type 1 for model, 2 for workload, 3 for schedulers, 4 to run, 5 for the typed command line, or q to quit."
+                note = "Type 1 for model, 2 for workload, 3 for schedulers, 4 to run, 5 for the typed command line, 6 for mode, 7 for machine, or q to quit."
         except _Quit:
             return 0
         except EOFError:
@@ -163,10 +168,26 @@ def _execute(state, read_line):
         if not item["path"].is_file():
             return f"The scheduler file {item['name']} is no longer in the folder. Choose schedulers again."
 
+    from gpu_bench.cli import _progress_printer, run_anywhere
+    from gpu_bench.runner import format_result
+
     _clear()
     chosen = [(item["name"], item["path"]) for item in state["schedulers"]]
     try:
-        print(compare(state["workload"]["path"], state["model"]["path"], chosen))
+        result = run_anywhere(
+            state["host"],
+            state["workload"]["path"],
+            state["model"]["path"],
+            chosen,
+            state["mode"],
+            1,
+            _progress_printer(state["mode"], state["host"]),
+        )
+        print(format_result(result))
+    except KeyboardInterrupt:
+        print()
+        print("stopped")
+        note = "Run stopped."
     except (OSError, ValueError, RuntimeError, KeyError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         note = f"Run failed: {exc}"
@@ -219,17 +240,64 @@ def _main_screen(state, note):
         *_field("model", _names([state["model"]]) if state["model"] else "(none)"),
         *_field("workload", _names([state["workload"]]) if state["workload"] else "(none)"),
         *_field("schedulers", _names(state["schedulers"]) if state["schedulers"] else "(none)"),
+        *_field("mode", _mode_label(state["mode"])),
+        *_field("machine", _host_label(state["host"])),
         "",
         "1  model",
         "2  workload",
         "3  schedulers",
         "4  run",
         "5  legacy command line",
+        "6  switch simulate / live",
+        "7  machine (this one or an SSH host)",
         "q  quit",
         "",
         note,
     ]
     return _frame("GPU inference scheduler", lines)
+
+
+def _mode_label(mode):
+    if mode == "live":
+        return "live (real clock, runs the model's backend)"
+    return "simulate (computed from the runtime formula)"
+
+
+def _host_label(host):
+    if host is None:
+        return "this machine"
+    from gpu_bench.store import describe_host
+
+    return f"{host['name']} ({describe_host(host)})"
+
+
+def _pick_host(state, read_line):
+    from gpu_bench.store import find_host, load_hosts
+
+    hosts = load_hosts()
+    note = "0 is this machine. Or type user@host to use a host you have not saved."
+    while True:
+        lines = ["Saved hosts come from `hosts add` or the desktop window.", "", " 0  this machine"]
+        for index, host in enumerate(hosts, start=1):
+            lines.append(f"{index:>2}  {_host_label(host)}")
+        lines += ["", "b  back", "", note]
+        _clear()
+        print(_frame("Select a machine", lines))
+        raw = read_line("Choose a machine: ").strip()
+        if raw.lower() in {"b", "back", ""}:
+            return f"Machine: {_host_label(state['host'])}"
+        if raw.lower() in {"q", "quit", "exit"}:
+            raise _Quit()
+        if raw == "0":
+            state["host"] = None
+            return "Machine: this machine"
+        index = _number(raw, len(hosts))
+        try:
+            state["host"] = hosts[index] if index is not None else find_host(raw)
+        except ValueError as exc:
+            note = str(exc)
+            continue
+        return f"Machine: {_host_label(state['host'])}"
 
 
 def _list_screen(title, folder, items, selected, note, many, chosen=None):

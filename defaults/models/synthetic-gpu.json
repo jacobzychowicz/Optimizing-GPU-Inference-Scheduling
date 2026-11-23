@@ -1,0 +1,21 @@
+{
+  "name": "synthetic-gpu",
+  "description": "Real GPU load from PyTorch matrix multiplies, sized by max_tokens or text length. Run it live; the runtime formula is only a rough guide for simulation.",
+  "runtime": {
+    "base_ms": 30,
+    "per_token_ms": 25,
+    "token_field": "max_tokens"
+  },
+  "backend": {
+    "type": "python",
+    "module": "../backends/torch_matmul.py",
+    "config": {
+      "device": "auto",
+      "matrix": 2048,
+      "base_iters": 2,
+      "iters_per_unit": 0.5,
+      "token_field": "max_tokens",
+      "text_field": "text"
+    }
+  }
+}

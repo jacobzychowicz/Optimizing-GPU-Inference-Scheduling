@@ -1,11 +1,12 @@
 """Command line for comparing schedulers by name."""
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 from gpu_bench.catalog import format_catalog, resolve, scheduler_items, workload_items
-from gpu_bench.compare import compare, load_json, model_for
+from gpu_bench.compare import load_json, model_for
 
 
 def main(argv=None):
@@ -13,7 +14,10 @@ def main(argv=None):
         argv = sys.argv[1:]
     try:
         return dispatch(argv)
-    except (ValueError, RuntimeError, KeyError) as exc:
+    except KeyboardInterrupt:
+        print("stopped", file=sys.stderr)
+        return 130
+    except (ValueError, RuntimeError, KeyError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
@@ -41,6 +45,12 @@ def dispatch(argv):
         return cmd_run(rest)
     if head == "gui":
         return _open_gui(rest)
+    if head == "gpus":
+        return cmd_gpus(rest)
+    if head == "hosts":
+        return cmd_hosts(rest)
+    if head == "history":
+        return cmd_history(rest)
     return cmd_run(argv)
 
 
@@ -55,7 +65,7 @@ def _open_menu(rest):
             f"usage: {prog} menu\n"
             "\n"
             "Open the numbered menu. Pick a model, a workload, and schedulers, then run.\n"
-            "Option 5 is the typed command line."
+            "Options 6 and 7 choose simulate or live, and this machine or an SSH host."
         )
         return 0
     if rest:
@@ -124,11 +134,17 @@ def cmd_run(argv):
             f"  {prog} mixed-lengths fifo priority\n"
             f"  {prog} token-mix --model example-llm\n"
             f"  {prog} run priority-mix -s fifo,aging\n"
+            f"  {prog} token-mix --model synthetic-gpu --live --repeat 3\n"
+            f"  {prog} token-mix --live --host gpu-box --save\n"
             "\n"
             "Schedulers you name are the only ones that run.\n"
             "Workloads you name are the only ones that run.\n"
             "Leave either out to use every sample of that kind.\n"
-            "One --model replaces the model on every workload in the run."
+            "One --model replaces the model on every workload in the run.\n"
+            "\n"
+            "simulate (the default) computes the schedule from the model's runtime formula.\n"
+            "live replays the workload on a real clock and runs each request on the\n"
+            "model's backend, measuring real latency and GPU use."
         ),
     )
     parser.add_argument(
@@ -137,26 +153,24 @@ def cmd_run(argv):
         metavar="name",
         help="workload, model, and scheduler names, or paths to your own files",
     )
-    parser.add_argument(
-        "-w",
-        "--workload",
-        action="append",
-        default=[],
-        help="workload name or JSON file. Repeat to run more than one.",
-    )
-    parser.add_argument(
-        "-s",
-        "--scheduler",
-        action="append",
-        default=[],
-        help="scheduler name or Python file. Repeat, or separate names with commas.",
-    )
-    parser.add_argument(
-        "-m",
-        "--model",
-        help="model name or JSON file. Default: the model named by the workload.",
-    )
+    parser.add_argument("-w", "--workload", action="append", default=[],
+                        help="workload name or JSON file. Repeat to run more than one.")
+    parser.add_argument("-s", "--scheduler", action="append", default=[],
+                        help="scheduler name or Python file. Repeat, or separate names with commas.")
+    parser.add_argument("-m", "--model", help="model name or JSON file. Default: the model named by the workload.")
+    parser.add_argument("--mode", choices=("simulate", "live"), default="simulate",
+                        help="simulate (default) or live on a real GPU")
+    parser.add_argument("--live", action="store_const", const="live", dest="mode", help="same as --mode live")
+    parser.add_argument("--host", help="run on a saved SSH host (see `hosts`) or user@host[:port]")
+    parser.add_argument("--repeat", type=int, default=1, metavar="N",
+                        help="live runs: run each scheduler N times and average (default 1)")
+    parser.add_argument("--save", action="store_true", help="keep the result in the run history")
+    parser.add_argument("--out", metavar="FILE", help="also write the result to FILE (.json, or .csv for a summary)")
+    parser.add_argument("--json", action="store_true", help="print the full result as JSON instead of a table")
+    parser.add_argument("--events", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.repeat < 1:
+        raise ValueError("--repeat must be 1 or more")
 
     workloads = []
     schedulers = []
@@ -207,17 +221,226 @@ def cmd_run(argv):
     if not schedulers:
         raise ValueError("no schedulers found")
 
+    host = None
+    if args.host:
+        from gpu_bench.store import find_host
+
+        host = find_host(args.host)
+
+    from gpu_bench.runner import format_result
+
     model_item = models[0] if models else None
-    blocks = []
     chosen = [(item["name"], item["path"]) for item in schedulers]
+    emit = _event_printer() if args.events else _progress_printer(args.mode, host)
+    results = []
     for workload_item in workloads:
         workload_path = workload_item["path"]
         if model_item is not None:
             model_path = model_item["path"]
         else:
             model_path = model_for(load_json(workload_path), None)
-        blocks.append(compare(workload_path, model_path, chosen))
-    print("\n\n".join(blocks))
+        results.append(run_anywhere(host, workload_path, model_path, chosen, args.mode, args.repeat, emit))
+
+    if args.events:
+        return 0
+    for result in results:
+        if args.save:
+            from gpu_bench.store import save_run
+
+            path = save_run(result)
+            print(f"saved to {path}", file=sys.stderr)
+    if args.out:
+        from gpu_bench.store import export
+
+        payload = results[0] if len(results) == 1 else {"runs": results}
+        if Path(args.out).suffix.lower() == ".csv" and len(results) > 1:
+            raise ValueError("--out .csv takes one workload. Use .json for several.")
+        if Path(args.out).suffix.lower() == ".json":
+            Path(args.out).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        else:
+            export(results[0], args.out)
+        print(f"wrote {args.out}", file=sys.stderr)
+    if args.json:
+        print(json.dumps(results[0] if len(results) == 1 else results, indent=2))
+    else:
+        print("\n\n".join(format_result(result) for result in results))
+    return 0
+
+
+def run_anywhere(host, workload_path, model_path, schedulers, mode, repeats, emit=None, cancel=None):
+    """Run on this machine, or on host over SSH when host is given."""
+    if host is None:
+        from gpu_bench.runner import execute
+
+        return execute(workload_path, model_path, schedulers, mode, repeats, emit, cancel)
+    from gpu_bench.remote import run
+
+    return run(host, workload_path, model_path, schedulers, mode, repeats, emit, cancel)
+
+
+def _event_printer():
+    def emit(event):
+        sys.stdout.write(json.dumps(event) + "\n")
+        sys.stdout.flush()
+
+    return emit
+
+
+def _progress_printer(mode, host):
+    """Live and remote runs take real time, so say what is happening on stderr."""
+    if mode == "simulate" and host is None:
+        return None
+
+    def emit(event):
+        kind = event.get("event")
+        if kind == "log":
+            print(f"  {event['message']}", file=sys.stderr)
+        elif kind == "scheduler_start":
+            suffix = f" (run {event['repeat']} of {event['repeats']})" if event.get("repeats", 1) > 1 else ""
+            print(f"  {event['scheduler']}{suffix}", file=sys.stderr)
+        elif kind == "job":
+            job = event["job"]
+            print(
+                f"    {event['done']}/{event['total']}  {job['id']}  "
+                f"waited {job['wait_ms']:.0f} ms, ran {job['service_ms']:.0f} ms",
+                file=sys.stderr,
+            )
+
+    return emit
+
+
+def cmd_gpus(argv):
+    parser = argparse.ArgumentParser(
+        prog=f"{program_name()} gpus",
+        description="Show the GPUs, Python, and PyTorch on this machine or an SSH host.",
+    )
+    parser.add_argument("--host", help="saved host name or user@host[:port]")
+    parser.add_argument("--json", action="store_true", help="print JSON")
+    parser.add_argument("--no-torch", action="store_true", help="skip the PyTorch check (faster)")
+    args = parser.parse_args(argv)
+    if args.host:
+        from gpu_bench.remote import probe
+        from gpu_bench.store import find_host
+
+        info = probe(find_host(args.host), check_torch=not args.no_torch)
+    else:
+        from gpu_bench.gpus import probe
+
+        info = probe(check_torch=not args.no_torch)
+    if args.json:
+        print(json.dumps(info))
+    else:
+        from gpu_bench.gpus import format_probe
+
+        print(format_probe(info))
+    return 0
+
+
+def cmd_hosts(argv):
+    prog = program_name()
+    parser = argparse.ArgumentParser(
+        prog=f"{prog} hosts",
+        description="Save SSH hosts so runs can use --host NAME. Login uses your normal ssh keys.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "examples:\n"
+            f"  {prog} hosts add gpu-box alice@10.0.0.5 --python /opt/venv/bin/python\n"
+            f"  {prog} hosts test gpu-box\n"
+            f"  {prog} hosts remove gpu-box"
+        ),
+    )
+    sub = parser.add_subparsers(dest="action")
+    sub.add_parser("list", help="show saved hosts")
+    add = sub.add_parser("add", help="save a host (or update one with the same name)")
+    add.add_argument("name")
+    add.add_argument("target", help="user@host, host, or a Host alias from ~/.ssh/config")
+    add.add_argument("--port", type=int)
+    add.add_argument("--key", help="private key file")
+    add.add_argument("--python", default="python3", help="Python on the server (default python3)")
+    add.add_argument("--workdir", default=".gpu-bench", help="scratch folder on the server (default ~/.gpu-bench)")
+    add.add_argument("-o", "--ssh-option", action="append", default=[], help="extra ssh -o Key=Value")
+    remove = sub.add_parser("remove", help="forget a saved host")
+    remove.add_argument("name")
+    test = sub.add_parser("test", help="connect and show the server's GPUs")
+    test.add_argument("name")
+    args = parser.parse_args(argv)
+
+    from gpu_bench import store
+
+    if args.action in (None, "list"):
+        hosts = store.load_hosts()
+        if not hosts:
+            print(f"No saved hosts. Add one with: {prog} hosts add NAME user@host")
+            return 0
+        for host in hosts:
+            print(f"  {host['name']:<16} {store.describe_host(host)}  python={host['python']}")
+        return 0
+    if args.action == "add":
+        user, _, address = args.target.rpartition("@")
+        host = store.save_host(
+            {
+                "name": args.name,
+                "host": address,
+                "user": user,
+                "port": args.port,
+                "key": args.key,
+                "python": args.python,
+                "workdir": args.workdir,
+                "ssh_options": args.ssh_option,
+            }
+        )
+        print(f"saved {host['name']} ({store.describe_host(host)}). Check it with: {prog} hosts test {host['name']}")
+        return 0
+    if args.action == "remove":
+        store.remove_host(args.name)
+        print(f"removed {args.name}")
+        return 0
+    if args.action == "test":
+        from gpu_bench.gpus import format_probe
+        from gpu_bench.remote import probe
+
+        host = store.find_host(args.name)
+        print(f"connecting to {store.describe_host(host)} ...", file=sys.stderr)
+        print(format_probe(probe(host)))
+        return 0
+    return 1
+
+
+def cmd_history(argv):
+    parser = argparse.ArgumentParser(
+        prog=f"{program_name()} history",
+        description="Saved runs (from --save or the desktop window), newest first.",
+    )
+    parser.add_argument("action", nargs="?", choices=("list", "show", "export"), default="list")
+    parser.add_argument("number", nargs="?", type=int, help="run number from the list")
+    parser.add_argument("file", nargs="?", help="export: .json, .csv (summary), or .jobs.csv (every job)")
+    args = parser.parse_args(argv)
+
+    from gpu_bench import store
+    from gpu_bench.runner import format_result
+
+    runs = store.list_runs()
+    if args.action == "list":
+        if not runs:
+            print("No saved runs yet. Add --save to a run, or run from the desktop window.")
+            return 0
+        for index, row in enumerate(runs, start=1):
+            print(
+                f"{index:>3}  {row['created']:<19}  {row['workload']:<16} {row['model']:<16} "
+                f"{row['mode']:<8} {row['target']:<12} best: {row['best']}"
+            )
+        return 0
+    if args.number is None or not 1 <= args.number <= len(runs):
+        raise ValueError(f"pass a run number from 1 to {len(runs)}")
+    result = store.load_run(runs[args.number - 1]["path"])
+    if args.action == "show":
+        print(format_result(result))
+        return 0
+    if not args.file:
+        raise ValueError("pass a file to export to")
+    kind = "jobs" if args.file.lower().endswith(".jobs.csv") else "summary"
+    store.export(result, args.file, kind)
+    print(f"wrote {args.file}")
     return 0
 
 
@@ -230,17 +453,20 @@ def program_name():
 
 def top_help():
     prog = program_name()
-    return f"""usage: {prog} [menu|list|run|gui] [name ...]
+    return f"""usage: {prog} [menu|list|run|gpus|hosts|history|gui] [name ...]
 
 In a terminal, `{prog}` opens a menu. Choose a model, a workload, and
-schedulers from the files in defaults/, then run. Option 5 is the typed
-command line. Names and flags still run directly, with no menu.
+schedulers, then run. Names and flags still run directly, with no menu.
 
   {prog}
   {prog} mixed-lengths fifo priority
   {prog} list
   {prog} token-mix --model example-llm
-  {prog} run priority-mix -s fifo,aging
+  {prog} token-mix --model synthetic-gpu --live      real GPU, this machine
+  {prog} token-mix --live --host gpu-box             real GPU, over SSH
+  {prog} gpus [--host gpu-box]                       what GPUs are there
+  {prog} hosts add gpu-box alice@10.0.0.5            save an SSH host
+  {prog} history                                     saved runs
   {prog} gui
 
 `{prog} run -h` explains each flag. `{prog} gui` opens the desktop window.
@@ -272,4 +498,3 @@ def _dedupe(items):
         seen.add(key)
         chosen.append(item)
     return chosen
-

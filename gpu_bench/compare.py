@@ -103,10 +103,12 @@ def run_schedule(jobs, select, model, scheduler_name):
         finished.append(
             {
                 "id": choice["id"],
+                "arrival_ms": arrival,
                 "start_ms": start,
                 "latency_ms": finish - arrival,
                 "wait_ms": start - arrival,
                 "finish_ms": finish,
+                "service_ms": service,
             }
         )
         now = finish
@@ -142,7 +144,29 @@ def model_for(workload, override):
     name = workload.get("model")
     if not name:
         raise ValueError(f"workload {workload.get('name', '')} has no model; pass --model")
+    from gpu_bench.store import user_dir
+
+    for folder in (MODELS, user_dir("models")):
+        candidate = folder / f"{name}.json"
+        if candidate.is_file():
+            return candidate
     return MODELS / f"{name}.json"
+
+
+def check_jobs(workload, label):
+    """Raise ValueError when a workload has no jobs or a job lacks a required field."""
+    jobs = workload.get("jobs") or []
+    if not jobs:
+        raise ValueError(f"workload {label} has no jobs")
+    seen = set()
+    for job in jobs:
+        missing = [key for key in ("id", "arrival_ms", "input") if key not in job]
+        if missing:
+            raise ValueError(f"job {job.get('id', '?')} in {label} is missing {', '.join(missing)}")
+        if job["id"] in seen:
+            raise ValueError(f"job id {job['id']} appears twice in {label}")
+        seen.add(job["id"])
+    return jobs
 
 
 def comparison(workload_path, model_path, schedulers):
@@ -153,14 +177,7 @@ def comparison(workload_path, model_path, schedulers):
     """
     workload = load_json(workload_path)
     model = load_json(model_path)
-    jobs = workload.get("jobs") or []
-    label = workload.get("name") or workload_path
-    if not jobs:
-        raise ValueError(f"workload {label} has no jobs")
-    for job in jobs:
-        missing = [key for key in ("id", "arrival_ms", "input") if key not in job]
-        if missing:
-            raise ValueError(f"job {job.get('id', '?')} in {label} is missing {', '.join(missing)}")
+    jobs = check_jobs(workload, workload.get("name") or workload_path)
     results = []
     for name, path in schedulers:
         select = load_select(path)

@@ -1,0 +1,13 @@
+{
+  "name": "example-worker",
+  "description": "Stand-in model served by a separate worker process. Copy it and point command at your own inference server.",
+  "runtime": {
+    "base_ms": 30,
+    "per_token_ms": 25,
+    "token_field": "max_tokens"
+  },
+  "backend": {
+    "type": "worker",
+    "command": ["python", "../backends/worker_example.py"]
+  }
+}

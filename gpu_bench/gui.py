@@ -1,19 +1,44 @@
-"""Small desktop window. The command line does not import this module."""
+"""Desktop window. The command line does not import this module."""
 
 import sys
+import threading
+import traceback
+from pathlib import Path
 
 try:
-    from PySide6.QtCore import Qt
-    from PySide6.QtGui import QColor, QPainter
+    from PySide6.QtCore import QThread, Qt, Signal
+    from PySide6.QtGui import QColor, QPainter, QPen
     from PySide6.QtWidgets import (
+        QAbstractItemView,
         QApplication,
+        QButtonGroup,
+        QComboBox,
+        QDialog,
+        QDialogButtonBox,
+        QFileDialog,
+        QFormLayout,
+        QGroupBox,
         QHBoxLayout,
+        QHeaderView,
         QLabel,
+        QLineEdit,
         QListWidget,
         QListWidgetItem,
+        QMainWindow,
+        QMenu,
+        QMessageBox,
+        QPlainTextEdit,
+        QProgressBar,
         QPushButton,
+        QRadioButton,
+        QScrollArea,
+        QSpinBox,
+        QSplitter,
         QTableWidget,
         QTableWidgetItem,
+        QTabWidget,
+        QToolButton,
+        QToolTip,
         QVBoxLayout,
         QWidget,
     )
@@ -21,14 +46,8 @@ except ImportError:
     Qt = None
 
 
-_BAR_COLORS = (
-    QColor("#4c78a8") if Qt else None,
-    QColor("#f58518") if Qt else None,
-    QColor("#54a24b") if Qt else None,
-    QColor("#e45756") if Qt else None,
-    QColor("#72b7b2") if Qt else None,
-    QColor("#b279a2") if Qt else None,
-)
+_BAR_COLORS = ("#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2", "#b279a2", "#eeca3b", "#9d755d")
+LOCAL = "__local__"
 
 
 def main():
@@ -39,133 +58,689 @@ def main():
         )
         return 1
     app = QApplication(sys.argv)
+    app.setApplicationName("GPU Inference Scheduler")
     window = Window()
-    window.resize(960, 640)
+    window.resize(1200, 760)
     window.show()
     return app.exec()
 
 
 if Qt is not None:
 
+    class Task(QThread):
+        """Runs fn(emit, cancel) off the UI thread. Events arrive through the event signal."""
+
+        event = Signal(object)
+        done = Signal(object)
+        failed = Signal(str)
+
+        def __init__(self, fn, parent=None):
+            super().__init__(parent)
+            self.fn = fn
+            self.cancel = threading.Event()
+
+        def run(self):
+            from gpu_bench.runner import Cancelled
+
+            try:
+                result = self.fn(self.event.emit, self.cancel)
+            except Cancelled:
+                self.failed.emit("Stopped.")
+            except (OSError, ValueError, RuntimeError, KeyError) as exc:
+                self.failed.emit(str(exc))
+            except Exception:  # show anything else instead of losing it in a thread
+                self.failed.emit(traceback.format_exc())
+            else:
+                self.done.emit(result)
+
     class Timeline(QWidget):
-        """One lane per scheduler. Each bar is a request on the GPU."""
+        """One lane per scheduler. Each bar is a request on the GPU. Hover a bar for details."""
 
         def __init__(self):
             super().__init__()
             self.results = []
-            self.setMinimumHeight(80)
+            self.message = "Run a comparison to see the schedule."
+            self._bars = []
+            self.setMouseTracking(True)
+            self.setMinimumHeight(90)
 
-        def set_results(self, results):
+        def set_results(self, results, message=None):
             self.results = results
+            self.message = message or "Run a comparison to see the schedule."
             lanes = max(1, len(results))
-            self.setMinimumHeight(52 + lanes * 30)
+            self.setMinimumHeight(56 + lanes * 30)
             self.update()
 
         def paintEvent(self, _event):
             painter = QPainter(self)
-            if not self.results:
-                painter.drawText(
-                    self.rect(),
-                    Qt.AlignmentFlag.AlignCenter,
-                    "Run a comparison to see the schedule.",
-                )
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+            self._bars = []
+            jobs_all = [job for item in self.results for job in item.get("jobs", [])]
+            if not jobs_all:
+                painter.setPen(self.palette().color(self.foregroundRole()))
+                painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.message)
                 return
 
             metrics = painter.fontMetrics()
             label_w = max(metrics.horizontalAdvance(item["name"]) for item in self.results) + 16
-            makespan = max(job["finish_ms"] for item in self.results for job in item["jobs"]) or 1
+            makespan = max(job["finish_ms"] for job in jobs_all) or 1
             plot_w = max(1, self.width() - label_w - 12)
             lane_h = 22
+            text_pen = QPen(self.palette().color(self.foregroundRole()))
             for index, item in enumerate(self.results):
                 y = 8 + index * 30
-                painter.drawText(
-                    4,
-                    y,
-                    label_w - 12,
-                    lane_h,
-                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                    item["name"],
-                )
-                for job in item["jobs"]:
+                painter.setPen(text_pen)
+                painter.drawText(4, y, label_w - 12, lane_h,
+                                 Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, item["name"])
+                for job in item.get("jobs", []):
                     x = label_w + plot_w * job["start_ms"] / makespan
-                    width = max(1, plot_w * (job["finish_ms"] - job["start_ms"]) / makespan)
-                    painter.fillRect(int(x), y, int(width), lane_h, _bar_color(job["id"]))
+                    width = max(1.0, plot_w * (job["finish_ms"] - job["start_ms"]) / makespan)
+                    color = _bar_color(job["id"])
+                    painter.fillRect(int(x), y, max(1, int(width) - 1), lane_h, color)
+                    self._bars.append((int(x), y, int(width), lane_h, item["name"], job))
                     if width >= 48:
-                        painter.drawText(
-                            int(x) + 4,
-                            y,
-                            int(width) - 8,
-                            lane_h,
-                            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                            job["id"],
-                        )
+                        painter.setPen(QPen(QColor("white")))
+                        painter.drawText(int(x) + 4, y, int(width) - 8, lane_h,
+                                         Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, str(job["id"]))
+            painter.setPen(text_pen)
             end = f"{makespan:.0f} ms"
-            painter.drawText(label_w, self.height() - 18, "0 ms")
-            painter.drawText(self.width() - metrics.horizontalAdvance(end) - 8, self.height() - 18, end)
+            painter.drawText(label_w, self.height() - 10, "0 ms")
+            painter.drawText(self.width() - metrics.horizontalAdvance(end) - 8, self.height() - 10, end)
 
+        def mouseMoveEvent(self, event):
+            pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+            for x, y, w, h, name, job in self._bars:
+                if x <= pos.x() <= x + max(w, 2) and y <= pos.y() <= y + h:
+                    QToolTip.showText(
+                        event.globalPosition().toPoint() if hasattr(event, "globalPosition") else event.globalPos(),
+                        f"{name}: {job['id']}\n"
+                        f"arrived {job.get('arrival_ms', 0):.0f} ms, started {job['start_ms']:.0f} ms\n"
+                        f"waited {job['wait_ms']:.0f} ms, ran {job.get('service_ms', job['finish_ms'] - job['start_ms']):.0f} ms\n"
+                        f"latency {job['latency_ms']:.0f} ms",
+                        self,
+                    )
+                    return
+            QToolTip.hideText()
 
-    class Window(QWidget):
+    class HostDialog(QDialog):
+        """Add, edit, test, and remove SSH hosts."""
+
+        def __init__(self, parent=None, select=None):
+            super().__init__(parent)
+            self.setWindowTitle("SSH hosts")
+            self.resize(760, 460)
+            self._task = None
+            self._editing = None
+
+            self.list = QListWidget()
+            self.list.currentRowChanged.connect(self._load_row)
+            new = QPushButton("New")
+            new.clicked.connect(self._new)
+            delete = QPushButton("Delete")
+            delete.clicked.connect(self._delete)
+            left = QVBoxLayout()
+            left.addWidget(self.list, 1)
+            row = QHBoxLayout()
+            row.addWidget(new)
+            row.addWidget(delete)
+            left.addLayout(row)
+
+            self.name = QLineEdit()
+            self.host = QLineEdit()
+            self.host.setPlaceholderText("gpu.example.com, 10.0.0.5, or a Host alias from ~/.ssh/config")
+            self.user = QLineEdit()
+            self.user.setPlaceholderText("optional")
+            self.port = QLineEdit()
+            self.port.setPlaceholderText("22")
+            self.key = QLineEdit()
+            self.key.setPlaceholderText("optional: uses your ssh agent and default keys")
+            browse = QToolButton()
+            browse.setText("...")
+            browse.clicked.connect(self._browse_key)
+            key_row = QHBoxLayout()
+            key_row.addWidget(self.key, 1)
+            key_row.addWidget(browse)
+            self.python = QLineEdit()
+            self.python.setPlaceholderText("python3, /opt/venv/bin/python, conda run -n infer python")
+            self.workdir = QLineEdit()
+            self.workdir.setPlaceholderText(".gpu-bench (inside your home folder)")
+            self.options = QLineEdit()
+            self.options.setPlaceholderText("optional, comma separated: ProxyJump=bastion, IdentitiesOnly=yes")
+
+            form = QFormLayout()
+            form.addRow("Name", self.name)
+            form.addRow("Host", self.host)
+            form.addRow("User", self.user)
+            form.addRow("Port", self.port)
+            form.addRow("Key file", key_row)
+            form.addRow("Python", self.python)
+            form.addRow("Scratch folder", self.workdir)
+            form.addRow("ssh options", self.options)
+
+            save = QPushButton("Save")
+            save.clicked.connect(self._save)
+            self.test = QPushButton("Test connection")
+            self.test.clicked.connect(self._test)
+            buttons = QHBoxLayout()
+            buttons.addWidget(save)
+            buttons.addWidget(self.test)
+            buttons.addStretch(1)
+
+            self.output = QPlainTextEdit()
+            self.output.setReadOnly(True)
+            self.output.setPlaceholderText(
+                "Login uses your normal ssh setup (keys, agent, ~/.ssh/config). Password prompts can't be "
+                "answered here, so run ssh-copy-id user@host once if you log in with a password. "
+                "The server only needs Python 3.8+."
+            )
+
+            right = QVBoxLayout()
+            right.addLayout(form)
+            right.addLayout(buttons)
+            right.addWidget(self.output, 1)
+
+            close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+            close.rejected.connect(self.reject)
+            body = QHBoxLayout()
+            body.addLayout(left, 1)
+            body.addLayout(right, 2)
+            outer = QVBoxLayout(self)
+            outer.addLayout(body, 1)
+            outer.addWidget(close)
+            self._refresh(select)
+
+        def _refresh(self, select=None):
+            from gpu_bench.store import describe_host, load_hosts
+
+            self.hosts = load_hosts()
+            self.list.blockSignals(True)
+            self.list.clear()
+            for host in self.hosts:
+                self.list.addItem(f"{host['name']}  ({describe_host(host)})")
+            self.list.blockSignals(False)
+            names = [host["name"] for host in self.hosts]
+            if select in names:
+                self.list.setCurrentRow(names.index(select))
+            elif self.hosts:
+                self.list.setCurrentRow(0)
+            else:
+                self._new()
+
+        def _load_row(self, row):
+            if not 0 <= row < len(self.hosts):
+                return
+            host = self.hosts[row]
+            self._editing = host["name"]
+            self.name.setText(host["name"])
+            self.host.setText(host["host"])
+            self.user.setText(host["user"])
+            self.port.setText(str(host["port"] or ""))
+            self.key.setText(host["key"])
+            self.python.setText(host["python"])
+            self.workdir.setText(host["workdir"])
+            self.options.setText(", ".join(host["ssh_options"]))
+
+        def _new(self):
+            self._editing = None
+            self.list.clearSelection()
+            for field in (self.name, self.host, self.user, self.port, self.key, self.options):
+                field.clear()
+            self.python.setText("python3")
+            self.workdir.setText(".gpu-bench")
+            self.host.setFocus()
+
+        def _form(self):
+            return {
+                "name": self.name.text().strip(),
+                "host": self.host.text().strip(),
+                "user": self.user.text().strip(),
+                "port": self.port.text().strip() or None,
+                "key": self.key.text().strip(),
+                "python": self.python.text().strip(),
+                "workdir": self.workdir.text().strip(),
+                "ssh_options": [part.strip() for part in self.options.text().split(",") if part.strip()],
+            }
+
+        def _save(self):
+            from gpu_bench.store import save_host
+
+            try:
+                host = save_host(self._form(), replace=self._editing)
+            except ValueError as exc:
+                QMessageBox.warning(self, "Can't save host", str(exc))
+                return None
+            self._refresh(host["name"])
+            self.output.setPlainText(f"Saved {host['name']}.")
+            return host
+
+        def _delete(self):
+            from gpu_bench.store import remove_host
+
+            if not self._editing:
+                return
+            if QMessageBox.question(self, "Delete host", f"Forget {self._editing}?") != QMessageBox.StandardButton.Yes:
+                return
+            remove_host(self._editing)
+            self._refresh()
+
+        def _browse_key(self):
+            path, _ = QFileDialog.getOpenFileName(self, "Private key", str(Path.home() / ".ssh"))
+            if path:
+                self.key.setText(path)
+
+        def _test(self):
+            from gpu_bench.store import normalize_host
+
+            try:
+                host = normalize_host(self._form())
+            except ValueError as exc:
+                self.output.setPlainText(str(exc))
+                return
+            from gpu_bench.gpus import format_probe
+            from gpu_bench.remote import probe
+            from gpu_bench.store import describe_host
+
+            self.output.setPlainText(f"Connecting to {describe_host(host)} ...")
+            self.test.setEnabled(False)
+            self._task = Task(lambda _emit, _cancel: probe(host), self)
+            self._task.done.connect(lambda info: self.output.setPlainText("Connected.\n\n" + format_probe(info)))
+            self._task.failed.connect(self.output.setPlainText)
+            self._task.finished.connect(lambda: self.test.setEnabled(True))
+            self._task.start()
+
+        def reject(self):
+            if self._task is not None and self._task.isRunning():
+                self._task.wait(100)
+            super().reject()
+
+    class Window(QMainWindow):
         def __init__(self):
             super().__init__()
-            self.setWindowTitle("GPU inference scheduler")
-            from gpu_bench.catalog import model_items, scheduler_items, workload_items
+            self.setWindowTitle("GPU Inference Scheduler")
+            from gpu_bench.store import load_settings
 
-            self._models = model_items()
-            self._workloads = workload_items()
-            self._schedulers = scheduler_items()
+            self.settings = load_settings()
+            self.task = None
+            self.probe_task = None
+            self.result = None
+            self.live = {}
+            self.progress_total = 0
+
+            central = QWidget()
+            self.setCentralWidget(central)
+            outer = QVBoxLayout(central)
+            outer.addLayout(self._build_machine_bar())
+            splitter = QSplitter(Qt.Orientation.Horizontal)
+            splitter.addWidget(self._build_setup())
+            splitter.addWidget(self._build_tabs())
+            splitter.setStretchFactor(0, 1)
+            splitter.setStretchFactor(1, 3)
+            splitter.setSizes([340, 860])
+            outer.addWidget(splitter, 1)
+
+            self._reload_catalog()
+            self._reload_hosts(self.settings.get("host"))
+            self._reload_history()
+            self._mode_changed()
+
+        # layout -------------------------------------------------------
+
+        def _build_machine_bar(self):
+            self.machine = QComboBox()
+            self.machine.setMinimumWidth(260)
+            self.machine.currentIndexChanged.connect(self._machine_changed)
+            hosts = QPushButton("Manage hosts...")
+            hosts.clicked.connect(self._manage_hosts)
+            self.check = QPushButton("Check GPUs")
+            self.check.clicked.connect(self._probe)
+            self.gpu_label = QLabel("")
+            self.gpu_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            bar = QHBoxLayout()
+            bar.addWidget(QLabel("Run on"))
+            bar.addWidget(self.machine)
+            bar.addWidget(hosts)
+            bar.addWidget(self.check)
+            bar.addWidget(self.gpu_label, 1)
+            return bar
+
+        def _build_setup(self):
+            mode_box = QGroupBox("Mode")
+            self.simulate = QRadioButton("Simulate")
+            self.simulate.setToolTip("Compute the schedule from the model's runtime formula. Instant, no GPU needed.")
+            self.live_mode = QRadioButton("Live on GPU")
+            self.live_mode.setToolTip(
+                "Replay the workload on a real clock and run each request on the model's backend.\n"
+                "Measures real latency and GPU use."
+            )
+            group = QButtonGroup(self)
+            group.addButton(self.simulate)
+            group.addButton(self.live_mode)
+            (self.live_mode if self.settings.get("mode") == "live" else self.simulate).setChecked(True)
+            self.simulate.toggled.connect(self._mode_changed)
+            self.repeats = QSpinBox()
+            self.repeats.setRange(1, 50)
+            self.repeats.setValue(int(self.settings.get("repeats", 1) or 1))
+            self.repeats.setToolTip("Run each scheduler this many times and average the numbers.")
+            mode_layout = QHBoxLayout(mode_box)
+            mode_layout.addWidget(self.simulate)
+            mode_layout.addWidget(self.live_mode)
+            mode_layout.addStretch(1)
+            mode_layout.addWidget(QLabel("Repeats"))
+            mode_layout.addWidget(self.repeats)
 
             self.models = QListWidget()
             self.workloads = QListWidget()
             self.schedulers = QListWidget()
-            self.models.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-            self.workloads.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-            _fill_plain(self.models, self._models)
-            _fill_plain(self.workloads, self._workloads)
-            _fill_checks(self.schedulers, self._schedulers)
-            if self.workloads.count():
-                self.workloads.setCurrentRow(0)
-            paired = self._workloads[0].get("model") if self._workloads else ""
-            model_row = next((index for index, item in enumerate(self._models) if item["name"] == paired), 0)
-            if self.models.count():
-                self.models.setCurrentRow(min(model_row, self.models.count() - 1))
+            self.workloads.currentRowChanged.connect(self._workload_changed)
+            self.models.currentRowChanged.connect(self._model_changed)
 
-            run = QPushButton("Run")
-            run.clicked.connect(self.run_comparison)
+            all_btn = QToolButton()
+            all_btn.setText("All")
+            all_btn.clicked.connect(lambda: self._check_all(True))
+            none_btn = QToolButton()
+            none_btn.setText("None")
+            none_btn.clicked.connect(lambda: self._check_all(False))
+            sched_head = QHBoxLayout()
+            sched_head.addWidget(QLabel("Schedulers"))
+            sched_head.addStretch(1)
+            sched_head.addWidget(all_btn)
+            sched_head.addWidget(none_btn)
+
+            add = QPushButton("Add your own file...")
+            add.setToolTip("A workload or model (.json) or a scheduler (.py). It stays in the lists next time.")
+            add.clicked.connect(self._add_file)
+
+            self.run_btn = QPushButton("Run")
+            self.run_btn.setDefault(True)
+            self.run_btn.clicked.connect(self.run_comparison)
+            self.stop_btn = QPushButton("Stop")
+            self.stop_btn.setEnabled(False)
+            self.stop_btn.clicked.connect(self._stop)
+            buttons = QHBoxLayout()
+            buttons.addWidget(self.run_btn, 2)
+            buttons.addWidget(self.stop_btn, 1)
+            self.progress = QProgressBar()
+            self.progress.setTextVisible(True)
+            self.progress.setValue(0)
             self.status = QLabel("Pick a model, a workload, and at least one scheduler.")
             self.status.setWordWrap(True)
 
-            chooser = QVBoxLayout()
-            chooser.addWidget(QLabel("Model"))
-            chooser.addWidget(self.models, 1)
-            chooser.addWidget(QLabel("Workload"))
-            chooser.addWidget(self.workloads, 1)
-            chooser.addWidget(QLabel("Schedulers"))
-            chooser.addWidget(self.schedulers, 1)
-            chooser.addWidget(run)
-            chooser.addWidget(self.status)
+            column = QVBoxLayout()
+            column.addWidget(mode_box)
+            column.addWidget(QLabel("Workload"))
+            column.addWidget(self.workloads, 1)
+            column.addWidget(QLabel("Model"))
+            column.addWidget(self.models, 1)
+            self.model_hint = QLabel("")
+            self.model_hint.setWordWrap(True)
+            self.model_hint.setStyleSheet("color: gray")
+            column.addWidget(self.model_hint)
+            column.addLayout(sched_head)
+            column.addWidget(self.schedulers, 1)
+            column.addWidget(add)
+            column.addLayout(buttons)
+            column.addWidget(self.progress)
+            column.addWidget(self.status)
+            panel = QWidget()
+            panel.setLayout(column)
+            return panel
 
-            self.table = QTableWidget(0, 5)
-            self.table.setHorizontalHeaderLabels(["scheduler", "mean_ms", "p95_ms", "wait_ms", "jobs/s"])
-            self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-            self.table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-            self.table.verticalHeader().setVisible(False)
-            self.table.horizontalHeader().setStretchLastSection(True)
+        def _build_tabs(self):
+            self.tabs = QTabWidget()
+
+            # results
+            self.headline = QLabel("")
+            self.headline.setWordWrap(True)
+            self.table = QTableWidget(0, 0)
+            _plain_table(self.table)
             self.note = QLabel("")
             self.note.setWordWrap(True)
             self.timeline = Timeline()
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setWidget(self.timeline)
+            export = QPushButton("Export...")
+            menu = QMenu(export)
+            menu.addAction("Summary as CSV...", lambda: self._export(self.result, "summary"))
+            menu.addAction("Every job as CSV...", lambda: self._export(self.result, "jobs"))
+            menu.addAction("Full result as JSON...", lambda: self._export(self.result, "json"))
+            export.setMenu(menu)
+            self.export_btn = export
+            export.setEnabled(False)
+            head = QHBoxLayout()
+            head.addWidget(self.headline, 1)
+            head.addWidget(export)
+            results = QWidget()
+            layout = QVBoxLayout(results)
+            layout.addLayout(head)
+            layout.addWidget(self.table, 2)
+            layout.addWidget(self.note)
+            layout.addWidget(QLabel("Schedule (hover a bar for details)"))
+            layout.addWidget(scroll, 2)
+            self.tabs.addTab(results, "Results")
 
-            results = QVBoxLayout()
-            results.addWidget(self.table, 1)
-            results.addWidget(self.note)
-            results.addWidget(self.timeline, 1)
+            # jobs
+            self.job_scheduler = QComboBox()
+            self.job_scheduler.currentIndexChanged.connect(self._show_jobs)
+            self.jobs_table = QTableWidget(0, 7)
+            self.jobs_table.setHorizontalHeaderLabels(
+                ["id", "arrival_ms", "start_ms", "finish_ms", "wait_ms", "service_ms", "latency_ms"]
+            )
+            _plain_table(self.jobs_table)
+            self.jobs_table.setSortingEnabled(True)
+            jobs = QWidget()
+            layout = QVBoxLayout(jobs)
+            row = QHBoxLayout()
+            row.addWidget(QLabel("Scheduler"))
+            row.addWidget(self.job_scheduler, 1)
+            layout.addLayout(row)
+            layout.addWidget(self.jobs_table, 1)
+            self.tabs.addTab(jobs, "Jobs")
 
-            layout = QHBoxLayout(self)
-            layout.addLayout(chooser, 1)
-            layout.addLayout(results, 2)
+            # log
+            self.log = QPlainTextEdit()
+            self.log.setReadOnly(True)
+            self.log.setMaximumBlockCount(5000)
+            self.tabs.addTab(self.log, "Log")
+
+            # history
+            self.history = QListWidget()
+            self.history.itemDoubleClicked.connect(lambda _item: self._open_history())
+            open_btn = QPushButton("Open")
+            open_btn.clicked.connect(self._open_history)
+            hist_export = QPushButton("Export...")
+            hist_menu = QMenu(hist_export)
+            hist_menu.addAction("Summary as CSV...", lambda: self._export(self._history_result(), "summary"))
+            hist_menu.addAction("Every job as CSV...", lambda: self._export(self._history_result(), "jobs"))
+            hist_menu.addAction("Full result as JSON...", lambda: self._export(self._history_result(), "json"))
+            hist_export.setMenu(hist_menu)
+            delete = QPushButton("Delete")
+            delete.clicked.connect(self._delete_history)
+            refresh = QPushButton("Refresh")
+            refresh.clicked.connect(self._reload_history)
+            history = QWidget()
+            layout = QVBoxLayout(history)
+            layout.addWidget(self.history, 1)
+            row = QHBoxLayout()
+            for button in (open_btn, hist_export, delete, refresh):
+                row.addWidget(button)
+            row.addStretch(1)
+            layout.addLayout(row)
+            self.tabs.addTab(history, "History")
+            return self.tabs
+
+        # catalog ------------------------------------------------------
+
+        def _reload_catalog(self, keep=True):
+            from gpu_bench.catalog import item_from_file, model_items, scheduler_items, workload_items
+
+            previous = (self._name_of(self.workloads, "_workloads"), self._name_of(self.models, "_models")) if keep else (None, None)
+            checked = {item["name"] for item in _checked(self.schedulers, getattr(self, "_schedulers", []))} if keep else set()
+            self._models = model_items()
+            self._workloads = workload_items()
+            self._schedulers = scheduler_items()
+            for path in self.settings.get("extra_files", []):
+                try:
+                    item = item_from_file(path)
+                except (ValueError, OSError):
+                    continue
+                target = {"model": self._models, "workload": self._workloads, "scheduler": self._schedulers}[item["kind"]]
+                if all(Path(existing["path"]).resolve() != Path(path).resolve() for existing in target):
+                    item["name"] = item["name"] if all(x["name"] != item["name"] for x in target) else f"{item['name']} ({Path(path).parent.name})"
+                    target.append(item)
+            for item in self._models:
+                item["data"] = _safe_json(item["path"])
+
+            self.workloads.blockSignals(True)
+            self.models.blockSignals(True)
+            _fill_plain(self.workloads, self._workloads, lambda item: item.get("description", ""))
+            _fill_plain(self.models, self._models, _model_tooltip, _model_label)
+            _fill_checks(self.schedulers, self._schedulers, checked)
+            self.workloads.blockSignals(False)
+            self.models.blockSignals(False)
+
+            names = [item["name"] for item in self._workloads]
+            self.workloads.setCurrentRow(names.index(previous[0]) if previous[0] in names else (0 if names else -1))
+            if previous[1]:
+                model_names = [item["name"] for item in self._models]
+                if previous[1] in model_names:
+                    self.models.setCurrentRow(model_names.index(previous[1]))
+
+        def _name_of(self, widget, attr):
+            items = getattr(self, attr, None)
+            if not items:
+                return None
+            row = widget.currentRow()
+            return items[row]["name"] if 0 <= row < len(items) else None
+
+        def _workload_changed(self, row):
+            if not 0 <= row < len(self._workloads):
+                return
+            paired = self._workloads[row].get("model")
+            names = [item["name"] for item in self._models]
+            if paired in names:
+                self.models.setCurrentRow(names.index(paired))
+            elif self.models.currentRow() < 0 and names:
+                self.models.setCurrentRow(0)
+
+        def _model_changed(self, row):
+            if not 0 <= row < len(self._models):
+                self.model_hint.setText("")
+                return
+            from gpu_bench.backends import describe
+
+            data = self._models[row].get("data") or {}
+            self.model_hint.setText(f"Live runs use: {describe(data)}")
+
+        def _check_all(self, state):
+            for index in range(self.schedulers.count()):
+                self.schedulers.item(index).setCheckState(Qt.CheckState.Checked if state else Qt.CheckState.Unchecked)
+
+        def _add_file(self):
+            from gpu_bench.catalog import item_from_file
+
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Add a workload, model, or scheduler", str(Path.cwd()),
+                "gpu-bench files (*.json *.py);;All files (*)",
+            )
+            if not path:
+                return
+            try:
+                item = item_from_file(path)
+            except (ValueError, OSError) as exc:
+                QMessageBox.warning(self, "Can't use that file", str(exc))
+                return
+            extra = self.settings.setdefault("extra_files", [])
+            if path not in extra:
+                extra.append(path)
+                self._save_settings()
+            self._reload_catalog()
+            self.status.setText(f"Added {item['kind']} {item['name']}.")
+
+        # machine ------------------------------------------------------
+
+        def _reload_hosts(self, select=None):
+            from gpu_bench.store import describe_host, load_hosts
+
+            self.hosts = {host["name"]: host for host in load_hosts()}
+            self.machine.blockSignals(True)
+            self.machine.clear()
+            self.machine.addItem("This computer", LOCAL)
+            for name, host in self.hosts.items():
+                self.machine.addItem(f"{name}  ({describe_host(host)})  over SSH", name)
+            index = self.machine.findData(select) if select else 0
+            self.machine.setCurrentIndex(max(index, 0))
+            self.machine.blockSignals(False)
+            self._machine_changed()
+
+        def _current_host(self):
+            key = self.machine.currentData()
+            return None if key in (None, LOCAL) else self.hosts.get(key)
+
+        def _machine_changed(self, *_args):
+            host = self._current_host()
+            self.settings["host"] = host["name"] if host else None
+            self._save_settings()
+            if host is None:
+                self._probe()
+            else:
+                self.gpu_label.setText("Press Check GPUs to connect and see this server's GPUs.")
+
+        def _manage_hosts(self):
+            current = self._current_host()
+            dialog = HostDialog(self, current["name"] if current else None)
+            dialog.exec()
+            self._reload_hosts(self.settings.get("host"))
+
+        def _probe(self):
+            if self.probe_task is not None and self.probe_task.isRunning():
+                return
+            host = self._current_host()
+            if host is None:
+                from gpu_bench.gpus import probe
+
+                fn = lambda _emit, _cancel: probe(check_torch=True)
+                self.gpu_label.setText("Checking this computer...")
+            else:
+                from gpu_bench.remote import probe as remote_probe
+                from gpu_bench.store import describe_host
+
+                fn = lambda _emit, _cancel: remote_probe(host)
+                self.gpu_label.setText(f"Connecting to {describe_host(host)}...")
+            self.check.setEnabled(False)
+            task = Task(fn, self)
+            task.done.connect(self._probe_done)
+            task.failed.connect(self._probe_failed)
+            task.finished.connect(lambda: self.check.setEnabled(True))
+            self.probe_task = task
+            task.start()
+
+        def _probe_done(self, info):
+            from gpu_bench.gpus import format_probe, short_gpu_label
+
+            torch = info.get("torch") or {}
+            extra = ""
+            if torch.get("installed") and not torch.get("error"):
+                extra = f"   PyTorch {torch.get('version')}" + (" (CUDA)" if torch.get("cuda") else "")
+            self.gpu_label.setText(f"{info.get('machine', '')}: {short_gpu_label(info)}{extra}")
+            self.gpu_label.setToolTip(format_probe(info))
+            self._log(format_probe(info))
+
+        def _probe_failed(self, message):
+            self.gpu_label.setText("Couldn't check GPUs. See the Log tab.")
+            self._log(message)
+
+        # running ------------------------------------------------------
+
+        def _mode(self):
+            return "live" if self.live_mode.isChecked() else "simulate"
+
+        def _mode_changed(self, *_args):
+            self.repeats.setEnabled(self._mode() == "live")
+            self.settings["mode"] = self._mode()
+            self._save_settings()
 
         def run_comparison(self):
-            from gpu_bench.compare import comparison
-
             model = _current(self.models, self._models)
             workload = _current(self.workloads, self._workloads)
             chosen = _checked(self.schedulers, self._schedulers)
@@ -179,52 +754,366 @@ if Qt is not None:
             if missing:
                 self.status.setText("Still needed: " + ", ".join(missing) + ".")
                 return
-            try:
-                data = comparison(
-                    workload["path"],
-                    model["path"],
-                    [(item["name"], item["path"]) for item in chosen],
-                )
-            except (OSError, ValueError, RuntimeError, KeyError) as exc:
-                self.status.setText(f"error: {exc}")
-                return
-            self._show(data)
-            self.status.setText(f"Compared {data['workload']['name']} on {data['model']['name']}.")
 
-        def _show(self, data):
-            results = data["results"]
-            self.table.setRowCount(len(results))
-            for row, item in enumerate(results):
-                summary = item["summary"]
-                values = [
-                    item["name"],
-                    f"{summary['mean_latency_ms']:.1f}",
-                    f"{summary['p95_latency_ms']:.1f}",
-                    f"{summary['mean_wait_ms']:.1f}",
-                    f"{summary['jobs_per_s']:.2f}",
-                ]
-                for column, value in enumerate(values):
-                    cell = QTableWidgetItem(value)
-                    if column:
+            mode = self._mode()
+            repeats = self.repeats.value() if mode == "live" else 1
+            host = self._current_host()
+            self.settings["repeats"] = self.repeats.value()
+            self._save_settings()
+            schedulers = [(item["name"], item["path"]) for item in chosen]
+            job_count = len((_safe_json(workload["path"]) or {}).get("jobs") or [])
+            self.progress_total = max(1, job_count * len(schedulers) * repeats)
+            self.progress.setRange(0, self.progress_total if mode == "live" or host else 0)
+            self.progress.setValue(0)
+            self.live = {}
+            self.timeline.set_results([], "Starting...")
+            self.table.setRowCount(0)
+            self.note.setText("")
+            self.headline.setText(f"Running <b>{workload['name']}</b> on <b>{model['name']}</b> ...")
+            self.export_btn.setEnabled(False)
+            self.tabs.setCurrentIndex(0)
+
+            from gpu_bench.cli import run_anywhere
+
+            def work(emit, cancel):
+                return run_anywhere(host, workload["path"], model["path"], schedulers, mode, repeats, emit, cancel)
+
+            where = host["name"] if host else "this computer"
+            self._log(f"--- {workload['name']} on {model['name']}, {mode}, {where}")
+            self.status.setText(f"Running {workload['name']} on {where}...")
+            self.task = Task(work, self)
+            self.task.event.connect(self._on_event)
+            self.task.done.connect(self._run_done)
+            self.task.failed.connect(self._run_failed)
+            self.task.finished.connect(self._run_finished)
+            self.run_btn.setEnabled(False)
+            self.stop_btn.setEnabled(True)
+            self.task.start()
+
+        def _on_event(self, event):
+            kind = event.get("event")
+            if kind == "log":
+                self._log(event["message"])
+            elif kind == "scheduler_start":
+                suffix = f" (run {event['repeat']} of {event['repeats']})" if event.get("repeats", 1) > 1 else ""
+                self.status.setText(f"Running {event['scheduler']}{suffix}...")
+                self._log(f"{event['scheduler']}{suffix}")
+                self.live[event["scheduler"]] = []
+                self._draw_live()
+            elif kind == "job_start":
+                suffix = f" (run {event['repeat']})" if event.get("repeat", 1) > 1 else ""
+                self.status.setText(
+                    f"{event['scheduler']}{suffix}: running {event['id']} ({event['done'] + 1} of {event['total']})..."
+                )
+                self._draw_live(f"{event['scheduler']} is running {event['id']} on the GPU...")
+            elif kind == "job":
+                job = event["job"]
+                self.live.setdefault(event["scheduler"], []).append(job)
+                self.progress.setValue(min(self.progress_total, self.progress.value() + 1))
+                self._log(f"  {event['done']}/{event['total']} {job['id']}: waited {job['wait_ms']:.0f} ms, ran {job['service_ms']:.0f} ms")
+                self._draw_live()
+            elif kind == "scheduler_done":
+                summary = event["summary"]
+                self._log(f"  {event['scheduler']}: mean {summary['mean_latency_ms']:.1f} ms, p95 {summary['p95_latency_ms']:.1f} ms")
+
+        def _draw_live(self, message=None):
+            self.timeline.set_results(
+                [{"name": name, "jobs": jobs} for name, jobs in self.live.items()],
+                message or "Waiting for the first request to finish...",
+            )
+
+        def _run_done(self, result):
+            from gpu_bench.store import save_run
+
+            self.progress.setRange(0, 1)
+            self.progress.setValue(1)
+            try:
+                path = save_run(result)
+                self._log(f"Saved to {path}")
+            except (OSError, ValueError) as exc:
+                self._log(f"Could not save to history: {exc}")
+            self._show(result)
+            self._reload_history()
+            self.status.setText(f"Done: {result['workload']['name']} on {result['model']['name']} ({result['mode']}).")
+
+        def _run_failed(self, message):
+            self.progress.setRange(0, 1)
+            self.progress.setValue(0)
+            self._log(message)
+            first = message.strip().splitlines()[0] if message.strip() else "failed"
+            self.status.setText(f"{first}  (details in the Log tab)" if "\n" in message.strip() else first)
+            if message != "Stopped.":
+                self.tabs.setCurrentIndex(2)
+
+        def _run_finished(self):
+            self.run_btn.setEnabled(True)
+            self.stop_btn.setEnabled(False)
+
+        def _stop(self):
+            if self.task is not None and self.task.isRunning():
+                self.task.cancel.set()
+                self.status.setText("Stopping after the current request...")
+                self.stop_btn.setEnabled(False)
+
+        # showing results ----------------------------------------------
+
+        def _show(self, result):
+            from gpu_bench.runner import lowest
+
+            self.result = result
+            self.export_btn.setEnabled(True)
+            rows = result["results"]
+            gpu_cols = any("gpu_util_pct" in item["summary"] for item in rows)
+            spread = any("mean_latency_spread_ms" in item["summary"] for item in rows)
+            headers = ["scheduler", "mean_ms", "p95_ms", "wait_ms", "jobs/s"]
+            keys = [None, "mean_latency_ms", "p95_latency_ms", "mean_wait_ms", "jobs_per_s"]
+            if spread:
+                headers.append("± mean_ms")
+                keys.append("mean_latency_spread_ms")
+            if gpu_cols:
+                headers += ["gpu busy %", "gpu mem MB"]
+                keys += ["gpu_util_pct", "gpu_mem_peak_mb"]
+            self.table.clear()
+            self.table.setColumnCount(len(headers))
+            self.table.setHorizontalHeaderLabels(headers)
+            self.table.setRowCount(len(rows))
+            best_mean = lowest(rows, "mean_latency_ms")[1] if len(rows) > 1 else []
+            for row, item in enumerate(rows):
+                for column, key in enumerate(keys):
+                    if key is None:
+                        cell = QTableWidgetItem(item["name"])
+                        if item["name"] in best_mean:
+                            font = cell.font()
+                            font.setBold(True)
+                            cell.setFont(font)
+                    else:
+                        value = item["summary"].get(key)
+                        if value is None:
+                            text = "-"
+                        elif key == "jobs_per_s":
+                            text = f"{value:.2f}"
+                        elif key in ("gpu_util_pct", "gpu_mem_peak_mb"):
+                            text = f"{value:.0f}"
+                        else:
+                            text = f"{value:.1f}"
+                        cell = QTableWidgetItem(text)
                         cell.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                     self.table.setItem(row, column, cell)
             self.table.resizeColumnsToContents()
-            self.note.setText(_lowest_note(results))
-            self.timeline.set_results(results)
+
+            where = result.get("target", "local")
+            where = "this computer" if where == "local" else where
+            gpus = ", ".join(gpu["name"] for gpu in result.get("gpus") or [])
+            bits = [
+                f"<b>{result['workload']['name']}</b> on <b>{result['model']['name']}</b>",
+                f"{result.get('mode', 'simulate')} on {where}" + (f" ({result.get('machine')})" if result.get("machine") else ""),
+            ]
+            if gpus:
+                bits.append(gpus)
+            if result.get("repeats", 1) > 1:
+                bits.append(f"average of {result['repeats']} runs")
+            if result.get("created"):
+                bits.append(result["created"].replace("T", " "))
+            self.headline.setText(" · ".join(bits))
+
+            notes = []
+            if len(rows) > 1:
+                for key, label in (("mean_latency_ms", "mean latency"), ("p95_latency_ms", "p95 latency"),
+                                   ("mean_wait_ms", "mean wait")):
+                    best, names = lowest(rows, key)
+                    notes.append(f"Lowest {label}: {', '.join(names)} ({best:.1f} ms)")
+            notes.append("mean_ms and p95_ms are latency from arrival to finish. wait_ms is time spent waiting.")
+            self.note.setText("\n".join(notes))
+            self.timeline.set_results(rows)
+
+            self.job_scheduler.blockSignals(True)
+            self.job_scheduler.clear()
+            for item in rows:
+                self.job_scheduler.addItem(item["name"])
+            self.job_scheduler.blockSignals(False)
+            self._show_jobs()
+
+        def _show_jobs(self, *_args):
+            if not self.result:
+                return
+            index = self.job_scheduler.currentIndex()
+            rows = self.result["results"]
+            if not 0 <= index < len(rows):
+                self.jobs_table.setRowCount(0)
+                return
+            jobs = rows[index]["jobs"]
+            keys = ["id", "arrival_ms", "start_ms", "finish_ms", "wait_ms", "service_ms", "latency_ms"]
+            self.jobs_table.setSortingEnabled(False)
+            self.jobs_table.setRowCount(len(jobs))
+            for row, job in enumerate(jobs):
+                for column, key in enumerate(keys):
+                    value = job.get(key, "")
+                    cell = QTableWidgetItem()
+                    if key == "id":
+                        cell.setText(str(value))
+                    else:
+                        cell.setData(Qt.ItemDataRole.DisplayRole, round(float(value), 1) if value != "" else "")
+                        cell.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                    self.jobs_table.setItem(row, column, cell)
+            self.jobs_table.setSortingEnabled(True)
+            self.jobs_table.resizeColumnsToContents()
+
+        # history ------------------------------------------------------
+
+        def _reload_history(self):
+            from gpu_bench.store import list_runs
+
+            self.history.clear()
+            for row in list_runs():
+                where = "this computer" if row["target"] == "local" else row["target"]
+                text = (
+                    f"{row['created'].replace('T', ' ')}   {row['workload']} on {row['model']}   "
+                    f"{row['mode']} · {where}   best mean: {row['best']}"
+                )
+                item = QListWidgetItem(text)
+                item.setData(Qt.ItemDataRole.UserRole, str(row["path"]))
+                item.setToolTip(", ".join(row["schedulers"]))
+                self.history.addItem(item)
+            if not self.history.count():
+                placeholder = QListWidgetItem("Finished runs show up here.")
+                placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
+                self.history.addItem(placeholder)
+
+        def _history_path(self):
+            item = self.history.currentItem()
+            return item.data(Qt.ItemDataRole.UserRole) if item else None
+
+        def _history_result(self):
+            from gpu_bench.store import load_run
+
+            path = self._history_path()
+            if not path:
+                return None
+            try:
+                return load_run(path)
+            except ValueError as exc:
+                QMessageBox.warning(self, "Can't open run", str(exc))
+                return None
+
+        def _open_history(self):
+            result = self._history_result()
+            if result:
+                self._show(result)
+                self.tabs.setCurrentIndex(0)
+
+        def _delete_history(self):
+            from gpu_bench.store import delete_run
+
+            path = self._history_path()
+            if not path:
+                return
+            if QMessageBox.question(self, "Delete run", "Delete this saved run?") != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                delete_run(path)
+            except OSError as exc:
+                QMessageBox.warning(self, "Can't delete", str(exc))
+            self._reload_history()
+
+        def _export(self, result, kind):
+            from gpu_bench.store import export
+
+            if not result:
+                QMessageBox.information(self, "Nothing to export", "Run a comparison or pick a saved run first.")
+                return
+            name = result.get("workload", {}).get("name", "run")
+            suggested, flt = {
+                "summary": (f"{name}-summary.csv", "CSV (*.csv)"),
+                "jobs": (f"{name}-jobs.csv", "CSV (*.csv)"),
+                "json": (f"{name}.json", "JSON (*.json)"),
+            }[kind]
+            path, _ = QFileDialog.getSaveFileName(self, "Export", str(Path.home() / suggested), flt)
+            if not path:
+                return
+            try:
+                export(result, path, "jobs" if kind == "jobs" else "summary")
+            except OSError as exc:
+                QMessageBox.warning(self, "Export failed", str(exc))
+                return
+            self.status.setText(f"Wrote {path}")
+
+        # misc ---------------------------------------------------------
+
+        def _log(self, text):
+            self.log.appendPlainText(text)
+
+        def _save_settings(self):
+            from gpu_bench.store import save_settings
+
+            try:
+                save_settings(self.settings)
+            except OSError:
+                pass
+
+        def closeEvent(self, event):
+            if self.task is not None and self.task.isRunning():
+                answer = QMessageBox.question(self, "Run in progress", "A run is still going. Stop it and quit?")
+                if answer != QMessageBox.StandardButton.Yes:
+                    event.ignore()
+                    return
+                self.task.cancel.set()
+                self.task.wait(5000)
+            for task in (self.probe_task,):
+                if task is not None and task.isRunning():
+                    task.wait(2000)
+            event.accept()
 
 
-def _fill_plain(widget, items):
+def _plain_table(table):
+    table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+    table.verticalHeader().setVisible(False)
+    table.horizontalHeader().setStretchLastSection(False)
+    table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+
+
+def _safe_json(path):
+    from gpu_bench.compare import load_json
+
+    try:
+        return load_json(path)
+    except ValueError:
+        return None
+
+
+def _model_label(item):
+    data = item.get("data") or {}
+    if "backend" in data and "runtime" not in data:
+        return f"{item['name']}   (live only)"
+    if "backend" in data:
+        return f"{item['name']}   (real backend)"
+    return item["name"]
+
+
+def _model_tooltip(item):
+    from gpu_bench.backends import describe
+
+    data = item.get("data") or {}
+    return f"{item.get('description', '')}\nLive runs use: {describe(data)}\n{item['path']}"
+
+
+def _fill_plain(widget, items, tooltip=None, label=None):
     widget.clear()
     for item in items:
-        widget.addItem(item["name"])
+        row = QListWidgetItem(label(item) if label else item["name"])
+        if tooltip:
+            row.setToolTip(tooltip(item))
+        widget.addItem(row)
 
 
-def _fill_checks(widget, items):
+def _fill_checks(widget, items, checked=None):
     widget.clear()
     for item in items:
         row = QListWidgetItem(item["name"])
         row.setFlags(row.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-        row.setCheckState(Qt.CheckState.Checked)
+        on = not checked or item["name"] in checked
+        row.setCheckState(Qt.CheckState.Checked if on else Qt.CheckState.Unchecked)
+        row.setToolTip(item.get("description", ""))
         widget.addItem(row)
 
 
@@ -238,32 +1127,15 @@ def _current(widget, items):
 def _checked(widget, items):
     chosen = []
     for index, item in enumerate(items):
-        if widget.item(index).checkState() == Qt.CheckState.Checked:
+        row = widget.item(index)
+        if row is not None and row.checkState() == Qt.CheckState.Checked:
             chosen.append(item)
     return chosen
 
 
 def _bar_color(job_id):
     total = sum(ord(char) for char in str(job_id))
-    return _BAR_COLORS[total % len(_BAR_COLORS)]
-
-
-def _lowest_note(results):
-    if len(results) < 2:
-        return ""
-    return "\n".join(
-        (
-            _lowest(results, "mean_latency_ms", "mean latency"),
-            _lowest(results, "p95_latency_ms", "p95 latency"),
-        )
-    )
-
-
-def _lowest(results, key, label):
-    scored = [(round(item["summary"][key], 1), item["name"]) for item in results]
-    best = min(score for score, _name in scored)
-    names = [name for score, name in scored if score == best]
-    return f"lowest {label}: {', '.join(names)} ({best:.1f} ms)"
+    return QColor(_BAR_COLORS[total % len(_BAR_COLORS)])
 
 
 if __name__ == "__main__":
