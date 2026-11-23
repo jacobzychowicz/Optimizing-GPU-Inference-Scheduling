@@ -1,0 +1,865 @@
+{
+  "name": "narration-small",
+  "description": "Narration traffic: full scripts from user-1 (35 lines), user-2 (35 lines) arrive as bursts of one request per sentence, while 8 single-line retakes arrive from other users who are waiting on them. Generated with seed 7.",
+  "model": "example-tts",
+  "jobs": [
+    {
+      "id": "user-1-seg001",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Had what rise not argued battle disappeared an system greatest did the everything but with did far for disappeared the that message over over battle disappeared final battle break had message warrior."
+      },
+      "predicted_duration_ms": 640
+    },
+    {
+      "id": "user-1-seg002",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Everything been this that final at before years know battle final the every about not far but the disappeared moon the."
+      },
+      "predicted_duration_ms": 397
+    },
+    {
+      "id": "user-1-seg003",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "The eastern battle the argued waiting a years a they final waiting to expected the of stronger a what that ordinary."
+      },
+      "predicted_duration_ms": 388
+    },
+    {
+      "id": "user-1-seg004",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Training never everything warrior what before final the the guild under expected battle."
+      },
+      "predicted_duration_ms": 304
+    },
+    {
+      "id": "user-1-seg005",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "But disappeared at city final of stronger dungeon guild believed eastern."
+      },
+      "predicted_duration_ms": 259
+    },
+    {
+      "id": "user-1-seg006",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Expected disappeared system stronger he a break break expected they silence of that."
+      },
+      "predicted_duration_ms": 292
+    },
+    {
+      "id": "user-1-seg007",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "The far a everything leaders the returned training they for training returned returned kingdom never began years quest stronger the been everything rise."
+      },
+      "predicted_duration_ms": 499
+    },
+    {
+      "id": "user-1-seg008",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "He ordinary moon had the before break break that break know who the that disappeared every."
+      },
+      "predicted_duration_ms": 313
+    },
+    {
+      "id": "user-1-seg009",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "In was the under had know the the training rise not argued red their what."
+      },
+      "predicted_duration_ms": 262
+    },
+    {
+      "id": "user-1-seg010",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Training the new guild a argued district that was never eastern who who at they been know the quest who in student believed the to argued been this their to waiting city did quest student argued silence leaders message rise this an while."
+      },
+      "predicted_duration_ms": 754
+    },
+    {
+      "id": "user-1-seg011",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Every with that returned night student expected leaders their their a district quest every a guild of guild argued they message know returned district."
+      },
+      "predicted_duration_ms": 493
+    },
+    {
+      "id": "user-1-seg012",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Moon red the who guild city they that dungeon night who for the the while did break."
+      },
+      "predicted_duration_ms": 292
+    },
+    {
+      "id": "user-1-seg013",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "They in silence he their training began eastern been red under district guild training far far he."
+      },
+      "predicted_duration_ms": 334
+    },
+    {
+      "id": "user-1-seg014",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Had the every system their new system enemy an with began gate quest this everything he disappeared leaders the battle student everything."
+      },
+      "predicted_duration_ms": 454
+    },
+    {
+      "id": "user-1-seg015",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Ordinary believed hunters years a the training for been district moon that before."
+      },
+      "predicted_duration_ms": 286
+    },
+    {
+      "id": "user-1-seg016",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Know before disappeared a every a warrior not an of before their but hunters gate red an a ordinary night a of ordinary."
+      },
+      "predicted_duration_ms": 400
+    },
+    {
+      "id": "user-1-seg017",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "A student quest before night of had everything that break hunters the what with for what system waiting that training."
+      },
+      "predicted_duration_ms": 394
+    },
+    {
+      "id": "user-1-seg018",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Had eastern message not break never in message in the ordinary that the everything night leaders."
+      },
+      "predicted_duration_ms": 331
+    },
+    {
+      "id": "user-1-seg019",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Believed the far the hunters believed dungeon while student moon enemy."
+      },
+      "predicted_duration_ms": 253
+    },
+    {
+      "id": "user-1-seg020",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Returned know they quest and warrior years and he for quest that training rise ordinary final expected gate did."
+      },
+      "predicted_duration_ms": 376
+    },
+    {
+      "id": "user-1-seg021",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Years for what and believed the did quest they."
+      },
+      "predicted_duration_ms": 181
+    },
+    {
+      "id": "user-1-seg022",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Quest that the kingdom the far everything and moon he warrior to with was in quest had years night at over at to the enemy."
+      },
+      "predicted_duration_ms": 409
+    },
+    {
+      "id": "user-1-seg023",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "And guild believed new greatest kingdom believed an far every ordinary district a of know the expected."
+      },
+      "predicted_duration_ms": 349
+    },
+    {
+      "id": "user-1-seg024",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "An at system returned the night the had that guild had he kingdom what over new the in disappeared they the an stronger under a enemy warrior the years."
+      },
+      "predicted_duration_ms": 496
+    },
+    {
+      "id": "user-1-seg025",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Quest argued while far gate a greatest at system leaders years the while."
+      },
+      "predicted_duration_ms": 259
+    },
+    {
+      "id": "user-1-seg026",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "An night a an the did quest did been that began warrior break believed waiting waiting over."
+      },
+      "predicted_duration_ms": 316
+    },
+    {
+      "id": "user-1-seg027",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "To training under dungeon gate expected training stronger moon city."
+      },
+      "predicted_duration_ms": 244
+    },
+    {
+      "id": "user-1-seg028",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "For an had to an the believed battle city returned they their warrior had the argued know the of before had over believed over rise a never quest the the but."
+      },
+      "predicted_duration_ms": 514
+    },
+    {
+      "id": "user-1-seg029",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Rise did to but district new what quest with the returned the expected the what who stronger warrior red over city night what under been while new waiting moon the."
+      },
+      "predicted_duration_ms": 532
+    },
+    {
+      "id": "user-1-seg030",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Never and not system never enemy student stronger eastern eastern."
+      },
+      "predicted_duration_ms": 238
+    },
+    {
+      "id": "user-1-seg031",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Far night at they district believed enemy the what an of and dungeon the the what battle did been to quest."
+      },
+      "predicted_duration_ms": 361
+    },
+    {
+      "id": "user-1-seg032",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Was argued returned expected never break their in the never of that waiting been everything guild the the that while the gate the break that night kingdom enemy new about but break dungeon."
+      },
+      "predicted_duration_ms": 607
+    },
+    {
+      "id": "user-1-seg033",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "A had a know had stronger the training a and the ordinary the every about for their over that."
+      },
+      "predicted_duration_ms": 322
+    },
+    {
+      "id": "user-1-seg034",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "Had changed of red had city stronger never had far he silence district everything the stronger waiting new quest that with waiting."
+      },
+      "predicted_duration_ms": 433
+    },
+    {
+      "id": "user-1-seg035",
+      "user": "user-1",
+      "kind": "script_segment",
+      "arrival_ms": 0,
+      "priority": 1,
+      "input": {
+        "text": "That silence city in what the an expected far message of while of for had far every a did for the before did."
+      },
+      "predicted_duration_ms": 367
+    },
+    {
+      "id": "retake-08",
+      "user": "user-3",
+      "kind": "retake",
+      "arrival_ms": 2335,
+      "priority": 2,
+      "input": {
+        "text": "To message break eastern system silence he but the every district city before message."
+      },
+      "predicted_duration_ms": 298
+    },
+    {
+      "id": "retake-04",
+      "user": "user-3",
+      "kind": "retake",
+      "arrival_ms": 4178,
+      "priority": 2,
+      "input": {
+        "text": "Waiting waiting the a night know the know a the dungeon eastern greatest kingdom."
+      },
+      "predicted_duration_ms": 283
+    },
+    {
+      "id": "user-2-seg001",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "The night believed changed dungeon changed to the the and the disappeared expected a."
+      },
+      "predicted_duration_ms": 295
+    },
+    {
+      "id": "user-2-seg002",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "An to over system did and a dungeon that city of the at believed he greatest for district began never the what break to."
+      },
+      "predicted_duration_ms": 400
+    },
+    {
+      "id": "user-2-seg003",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "Training training student know city the they far warrior the he returned the greatest city."
+      },
+      "predicted_duration_ms": 313
+    },
+    {
+      "id": "user-2-seg004",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "The was not what waiting to battle every dungeon quest message under the kingdom rise waiting the a the city a district to with far a their."
+      },
+      "predicted_duration_ms": 460
+    },
+    {
+      "id": "user-2-seg005",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "Everything they new returned for about returned expected greatest the everything argued break night the enemy."
+      },
+      "predicted_duration_ms": 370
+    },
+    {
+      "id": "user-2-seg006",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "The expected night at every returned eastern message quest enemy know moon expected red years message never everything disappeared under been break had system their."
+      },
+      "predicted_duration_ms": 535
+    },
+    {
+      "id": "user-2-seg007",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "The was they silence while every years to eastern."
+      },
+      "predicted_duration_ms": 190
+    },
+    {
+      "id": "user-2-seg008",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "While hunters silence know the they a they guild everything that before the the leaders at the."
+      },
+      "predicted_duration_ms": 325
+    },
+    {
+      "id": "user-2-seg009",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "Of every gate argued district their over changed a over that warrior."
+      },
+      "predicted_duration_ms": 247
+    },
+    {
+      "id": "user-2-seg010",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "Disappeared new every but a the argued and while red warrior quest the a waiting the under the."
+      },
+      "predicted_duration_ms": 325
+    },
+    {
+      "id": "user-2-seg011",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "Eastern dungeon new the expected he expected years kingdom waiting training a with gate the the argued under they ordinary night break in a changed."
+      },
+      "predicted_duration_ms": 484
+    },
+    {
+      "id": "user-2-seg012",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "For know what quest moon they the not everything expected of for returned had everything the moon with rise that enemy."
+      },
+      "predicted_duration_ms": 397
+    },
+    {
+      "id": "user-2-seg013",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "About new quest night hunters a years a with training stronger battle every."
+      },
+      "predicted_duration_ms": 268
+    },
+    {
+      "id": "user-2-seg014",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "A an to returned not eastern greatest know the district returned of about warrior enemy."
+      },
+      "predicted_duration_ms": 304
+    },
+    {
+      "id": "user-2-seg015",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "Every what about ordinary for of a quest the know the under moon guild system greatest about the been warrior the new greatest under the kingdom gate changed about years moon."
+      },
+      "predicted_duration_ms": 565
+    },
+    {
+      "id": "user-2-seg016",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "Expected far who but changed not break far training the rise did in break and changed stronger."
+      },
+      "predicted_duration_ms": 325
+    },
+    {
+      "id": "user-2-seg017",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "Had at the leaders everything everything believed argued city night break that the the the in for was did that final argued the in he kingdom."
+      },
+      "predicted_duration_ms": 466
+    },
+    {
+      "id": "user-2-seg018",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "Final moon about an silence been guild stronger in student silence but know dungeon never night waiting he warrior who the had a the dungeon did moon in the message."
+      },
+      "predicted_duration_ms": 535
+    },
+    {
+      "id": "user-2-seg019",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "Night district years the system warrior that student in dungeon leaders that training a every warrior before greatest gate that dungeon under."
+      },
+      "predicted_duration_ms": 466
+    },
+    {
+      "id": "user-2-seg020",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "At everything at battle a for dungeon about of an hunters for believed the moon never eastern."
+      },
+      "predicted_duration_ms": 322
+    },
+    {
+      "id": "user-2-seg021",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "The for district that know but he leaders the."
+      },
+      "predicted_duration_ms": 178
+    },
+    {
+      "id": "user-2-seg022",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "An ordinary warrior warrior the he they the ordinary they had an."
+      },
+      "predicted_duration_ms": 235
+    },
+    {
+      "id": "user-2-seg023",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "Had their but red was every he never stronger silence message but guild red new in gate red a the been new an who the began quest red an with the about greatest night years that in the a gate the silence quest was to had the argued of before student battle know new."
+      },
+      "predicted_duration_ms": 838
+    },
+    {
+      "id": "user-2-seg024",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "Quest the about final been argued while they hunters returned for red had."
+      },
+      "predicted_duration_ms": 262
+    },
+    {
+      "id": "user-2-seg025",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "At the battle the the greatest message training enemy red over the everything ordinary."
+      },
+      "predicted_duration_ms": 301
+    },
+    {
+      "id": "user-2-seg026",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "Never returned red warrior believed had the the leaders waiting know student leaders rise message changed."
+      },
+      "predicted_duration_ms": 358
+    },
+    {
+      "id": "user-2-seg027",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "The argued moon district in had kingdom a training of not but the been and that quest kingdom disappeared city before guild under."
+      },
+      "predicted_duration_ms": 430
+    },
+    {
+      "id": "user-2-seg028",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "Student expected a silence the warrior disappeared rise their that years with in disappeared know kingdom red far night been changed night."
+      },
+      "predicted_duration_ms": 457
+    },
+    {
+      "id": "user-2-seg029",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "City city everything red for ordinary at but waiting over had who rise the the the eastern they of for message know."
+      },
+      "predicted_duration_ms": 388
+    },
+    {
+      "id": "user-2-seg030",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "That while quest had and the far the student quest enemy city system."
+      },
+      "predicted_duration_ms": 247
+    },
+    {
+      "id": "user-2-seg031",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "Silence quest with night in gate every dungeon while under."
+      },
+      "predicted_duration_ms": 217
+    },
+    {
+      "id": "user-2-seg032",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "Rise district district to the their the returned final at system break moon battle what the silence been greatest their was know moon in guild been their."
+      },
+      "predicted_duration_ms": 502
+    },
+    {
+      "id": "user-2-seg033",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "But warrior but began argued night rise but dungeon know a the the was greatest greatest the did over over stronger who not."
+      },
+      "predicted_duration_ms": 412
+    },
+    {
+      "id": "user-2-seg034",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "The for quest believed guild new stronger had about gate a an district stronger moon their changed their the student not guild district."
+      },
+      "predicted_duration_ms": 448
+    },
+    {
+      "id": "user-2-seg035",
+      "user": "user-2",
+      "kind": "script_segment",
+      "arrival_ms": 6268,
+      "priority": 1,
+      "input": {
+        "text": "System did final stronger silence the the to night stronger had the guild never not never years expected began guild ordinary quest final in stronger system."
+      },
+      "predicted_duration_ms": 511
+    },
+    {
+      "id": "retake-03",
+      "user": "user-3",
+      "kind": "retake",
+      "arrival_ms": 9902,
+      "priority": 2,
+      "input": {
+        "text": "Returned he while eastern city with an every and waiting moon training training a gate a student guild in with gate every quest know silence."
+      },
+      "predicted_duration_ms": 463
+    },
+    {
+      "id": "retake-01",
+      "user": "user-3",
+      "kind": "retake",
+      "arrival_ms": 10653,
+      "priority": 2,
+      "input": {
+        "text": "They never before know over gate leaders not that."
+      },
+      "predicted_duration_ms": 190
+    },
+    {
+      "id": "retake-07",
+      "user": "user-3",
+      "kind": "retake",
+      "arrival_ms": 11617,
+      "priority": 2,
+      "input": {
+        "text": "Not final the this the district ordinary believed the about student the changed the the years break ordinary that red leaders the disappeared new a the that disappeared kingdom what everything everything over leaders battle."
+      },
+      "predicted_duration_ms": 712
+    },
+    {
+      "id": "retake-06",
+      "user": "user-3",
+      "kind": "retake",
+      "arrival_ms": 14529,
+      "priority": 2,
+      "input": {
+        "text": "The quest over not everything a that over in new for who the believed moon changed student years gate kingdom dungeon never know greatest."
+      },
+      "predicted_duration_ms": 454
+    },
+    {
+      "id": "retake-05",
+      "user": "user-3",
+      "kind": "retake",
+      "arrival_ms": 18265,
+      "priority": 2,
+      "input": {
+        "text": "Over enemy eastern believed been new a that the a the final began city everything returned city battle."
+      },
+      "predicted_duration_ms": 349
+    },
+    {
+      "id": "retake-02",
+      "user": "user-3",
+      "kind": "retake",
+      "arrival_ms": 19067,
+      "priority": 2,
+      "input": {
+        "text": "City their about the waiting quest for this an silence the over returned the he rise under a city greatest guild battle gate student training of far gate."
+      },
+      "predicted_duration_ms": 502
+    }
+  ]
+}

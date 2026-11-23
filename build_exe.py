@@ -45,6 +45,9 @@ def main():
         "--hidden-import", "win32ctypes.core",
         "--copy-metadata", "keyring",
     ]
+    icon = ROOT / "gpu_bench" / "assets" / "icon.ico"
+    if icon.is_file():
+        args += ["--icon", str(icon)]
     for module in EXCLUDES:
         args += ["--exclude-module", module]
     args.append(str(ROOT / "launch_gui.py"))

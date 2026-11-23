@@ -1,0 +1,19 @@
+{
+  "name": "xtts",
+  "description": "Real voice-cloning TTS (Coqui XTTS-v2) on a CUDA GPU. Needs coqui-tts and license acceptance on the GPU machine; see defaults/backends/tts_xtts.py. The runtime is a rough guess: calibrate it from a live run.",
+  "runtime": {
+    "base_ms": 200,
+    "per_character_ms": 10,
+    "text_field": "text"
+  },
+  "backend": {
+    "type": "python",
+    "module": "../backends/tts_xtts.py",
+    "config": {
+      "agree_to_cpml": false,
+      "language": "en",
+      "speaker": "Ana Florence",
+      "device": "cuda"
+    }
+  }
+}

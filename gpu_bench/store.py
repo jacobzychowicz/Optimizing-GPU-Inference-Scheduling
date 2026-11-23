@@ -299,7 +299,8 @@ SUMMARY_COLUMNS = (
     ("gpu_util_pct", "gpu_util_pct"),
     ("gpu_mem_peak_mb", "gpu_mem_peak_mb"),
 )
-JOB_COLUMNS = ("scheduler", "id", "arrival_ms", "start_ms", "finish_ms", "wait_ms", "latency_ms", "service_ms")
+JOB_COLUMNS = ("scheduler", "id", "kind", "user", "arrival_ms", "start_ms", "finish_ms", "wait_ms", "latency_ms",
+               "service_ms")
 
 
 def export(result, path, kind="summary"):
@@ -318,11 +319,15 @@ def export(result, path, kind="summary"):
                 for job in item.get("jobs", []):
                     writer.writerow([item["name"], *(job.get(col, "") for col in JOB_COLUMNS[1:]), *context])
         else:
-            writer.writerow([label for label, _key in SUMMARY_COLUMNS] + ["workload", "model", "mode", "target", "created"])
+            writer.writerow([label for label, _key in SUMMARY_COLUMNS] + ["kind", "count", "workload", "model", "mode",
+                                                                           "target", "created"])
             for item in result.get("results", []):
                 summary = item["summary"]
                 row = [item["name"]] + [_fmt(summary.get(key)) for _label, key in SUMMARY_COLUMNS[1:]]
-                writer.writerow(row + context)
+                writer.writerow(row + ["all", len(item.get("jobs", [])) or ""] + context)
+                for kind, stats in (summary.get("by_kind") or {}).items():
+                    row = [item["name"]] + [_fmt(stats.get(key)) for _label, key in SUMMARY_COLUMNS[1:]]
+                    writer.writerow(row + [kind, _fmt(stats.get("count"))] + context)
     return path
 
 

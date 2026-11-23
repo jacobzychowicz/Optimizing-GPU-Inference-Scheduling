@@ -19,7 +19,7 @@ import socket
 import threading
 import time
 
-from gpu_bench.compare import check_jobs, load_json, load_select, run_schedule, summarize
+from gpu_bench.compare import check_jobs, job_tags, load_json, load_select, run_schedule, summarize
 
 
 MODES = ("simulate", "live")
@@ -191,6 +191,7 @@ def run_live(jobs, select, backend, scheduler_name, cancel, emit, repeat=1):
             "wait_ms": round(start - arrival, 3),
             "finish_ms": round(finish, 3),
             "service_ms": round(finish - start, 3),
+            **job_tags(choice),
         }
         finished.append(record)
         emit(
@@ -212,10 +213,20 @@ def _average(runs):
     keys = set()
     for run in runs:
         keys.update(run)
+    keys.discard("by_kind")
     average = {}
     for key in keys:
         values = [run[key] for run in runs if key in run]
         average[key] = max(values) if key == "gpu_mem_peak_mb" else sum(values) / len(values)
+    kinds = {}
+    for run in runs:
+        for kind, stats in (run.get("by_kind") or {}).items():
+            kinds.setdefault(kind, []).append(stats)
+    if kinds:
+        average["by_kind"] = {
+            kind: {key: sum(stats[key] for stats in group) / len(group) for key in group[0]}
+            for kind, group in kinds.items()
+        }
     means = [run["mean_latency_ms"] for run in runs]
     center = sum(means) / len(means)
     average["mean_latency_spread_ms"] = (sum((value - center) ** 2 for value in means) / (len(means) - 1)) ** 0.5
@@ -260,6 +271,14 @@ def format_result(result):
             line += f" {util:6.0f}" if util is not None else f" {'-':>6}"
             line += f" {mem:8.0f}" if mem is not None else f" {'-':>8}"
         lines.append(line)
+        for kind, stats in (summary.get("by_kind") or {}).items():
+            label = f"  {kind} ({stats['count']:.0f})"
+            lines.append(
+                f"{label:<{width}} "
+                f"{stats['mean_latency_ms']:10.1f} "
+                f"{stats['p95_latency_ms']:10.1f} "
+                f"{stats['mean_wait_ms']:10.1f}"
+            )
     lines.append("")
     lines.append("mean_ms and p95_ms are latency from arrival to finish. wait_ms is time spent waiting.")
     if len(rows) > 1:

@@ -51,6 +51,10 @@ def dispatch(argv):
         return cmd_hosts(rest)
     if head == "history":
         return cmd_history(rest)
+    if head == "generate":
+        return cmd_generate(rest)
+    if head == "calibrate":
+        return cmd_calibrate(rest)
     return cmd_run(argv)
 
 
@@ -372,6 +376,114 @@ def _progress_printer(mode, host):
     return emit
 
 
+def cmd_generate(argv):
+    prog = program_name()
+    parser = argparse.ArgumentParser(
+        prog=f"{prog} generate",
+        description="Make a workload file. Saved to ~/.gpu_bench/workloads so it shows up by name.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "presets:\n"
+            "  narration  long scripts split into one request per sentence (all arriving at once),\n"
+            "             plus single-line retakes from other users who are waiting on them\n"
+            "  traffic    requests arriving steadily, in bursts, or ramping up\n"
+            "\n"
+            "examples:\n"
+            f"  {prog} generate narration-busy --users 4 --segments 100 400 --retakes 20\n"
+            f"  {prog} generate chat-200 --preset traffic --count 200 --rate 4 --pattern bursty"
+        ),
+    )
+    parser.add_argument("name", help="workload name (also the file name)")
+    parser.add_argument("--preset", choices=("narration", "traffic"), default="narration")
+    parser.add_argument("-m", "--model", help="model whose runtime fills predicted_duration_ms (and is the default model)")
+    parser.add_argument("--seed", type=int, default=7, help="same seed, same workload (default 7)")
+    parser.add_argument("--out", help="write here instead of ~/.gpu_bench/workloads/NAME.json")
+    parser.add_argument("--force", action="store_true", help="overwrite an existing file")
+    narration = parser.add_argument_group("narration")
+    narration.add_argument("--users", type=int, default=4, help="people sharing the GPU (default 4)")
+    narration.add_argument("--script-users", type=int, help="how many submit a full script (default: half)")
+    narration.add_argument("--segments", type=int, nargs=2, default=(100, 400), metavar=("MIN", "MAX"),
+                           help="sentences per script (default 100 400)")
+    narration.add_argument("--retakes", type=int, default=20, help="single-line retakes (default 20)")
+    traffic = parser.add_argument_group("traffic")
+    traffic.add_argument("--count", type=int, default=200)
+    traffic.add_argument("--rate", type=float, default=4.0, help="requests per second (default 4)")
+    traffic.add_argument("--pattern", choices=("steady", "bursty", "ramp"), default="steady")
+    traffic.add_argument("--field", choices=("max_tokens", "text"), default="max_tokens",
+                         help="request size field: max_tokens (LLM) or text (speech)")
+    args = parser.parse_args(argv)
+
+    from gpu_bench import workloads
+    from gpu_bench.store import SAFE_NAME, user_dir
+
+    if not SAFE_NAME.match(args.name):
+        raise ValueError("a workload name may use letters, digits, dot, dash, and underscore")
+    model = model_name = None
+    if args.model:
+        item = resolve(args.model, "model")
+        model, model_name = load_json(item["path"]), item["name"]
+    if args.preset == "narration":
+        data = workloads.generate_narration(
+            args.name, args.users, args.script_users, args.segments, args.retakes,
+            model=model, model_name=model_name, seed=args.seed,
+        )
+    else:
+        data = workloads.generate_traffic(
+            args.name, args.count, args.rate, args.pattern, args.field,
+            model=model, model_name=model_name, seed=args.seed,
+        )
+    path = Path(args.out) if args.out else user_dir("workloads") / f"{args.name}.json"
+    if path.exists() and not args.force:
+        raise ValueError(f"{path} already exists. Pass --force to replace it.")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    kinds = {}
+    for job in data["jobs"]:
+        kinds[job.get("kind", "request")] = kinds.get(job.get("kind", "request"), 0) + 1
+    detail = ", ".join(f"{count} {kind}" for kind, count in kinds.items())
+    print(f"wrote {path}: {len(data['jobs'])} jobs ({detail}), model {data['model']}")
+    print(f"run it with: {prog} {args.name} fifo fair_share retake_first")
+    return 0
+
+
+def cmd_calibrate(argv):
+    prog = program_name()
+    parser = argparse.ArgumentParser(
+        prog=f"{prog} calibrate",
+        description=(
+            "Fit the model's runtime formula to the GPU times a live run measured, then check how "
+            "closely a simulation with the fitted model matches the live run."
+        ),
+    )
+    parser.add_argument("run", help="run number from `history`, or a result .json file")
+    parser.add_argument("--save", metavar="NAME", nargs="?", const="",
+                        help="save the calibrated model to ~/.gpu_bench/models (default name: MODEL-calibrated)")
+    args = parser.parse_args(argv)
+
+    from gpu_bench import calibrate, store
+
+    if args.run.isdigit():
+        runs = store.list_runs()
+        number = int(args.run)
+        if not 1 <= number <= len(runs):
+            raise ValueError(f"pass a run number from 1 to {len(runs)} (see `{prog} history`)")
+        result = store.load_run(runs[number - 1]["path"])
+    else:
+        result = load_json(args.run)
+    coefficients = calibrate.fit(result)
+    model = calibrate.calibrated_model(result, coefficients, args.save or None)
+    print(calibrate.format_report(coefficients, calibrate.check(result, model)))
+    if args.save is not None:
+        if not store.SAFE_NAME.match(model["name"]):
+            raise ValueError("a model name may use letters, digits, dot, dash, and underscore")
+        path = store.user_dir("models") / f"{model['name']}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(model, indent=2), encoding="utf-8")
+        print()
+        print(f"saved {path}. Simulate with: {prog} WORKLOAD --model {model['name']}")
+    return 0
+
+
 def cmd_gpus(argv):
     parser = argparse.ArgumentParser(
         prog=f"{program_name()} gpus",
@@ -543,7 +655,7 @@ def program_name():
 
 def top_help():
     prog = program_name()
-    return f"""usage: {prog} [menu|list|run|gpus|hosts|history|gui] [name ...]
+    return f"""usage: {prog} [menu|list|run|gpus|hosts|history|generate|calibrate|gui] [name ...]
 
 In a terminal, `{prog}` opens a menu. Choose a model, a workload, and
 schedulers, then run. Names and flags still run directly, with no menu.
@@ -557,6 +669,8 @@ schedulers, then run. Names and flags still run directly, with no menu.
   {prog} gpus [--host gpu-box]                       what GPUs are there
   {prog} hosts add gpu-box alice@10.0.0.5            save an SSH host
   {prog} history                                     saved runs
+  {prog} generate busy --users 4                     make a narration workload
+  {prog} calibrate 1                                 fit a model to a live run
   {prog} gui
 
 `{prog} run -h` explains each flag. `{prog} gui` opens the desktop window.

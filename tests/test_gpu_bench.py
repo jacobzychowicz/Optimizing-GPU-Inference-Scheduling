@@ -201,6 +201,93 @@ class PasswordTests(TempHome):
         self.assertEqual(self.vault, {})
 
 
+class NarrationTests(TempHome):
+    def setUp(self):
+        super().setUp()
+        from gpu_bench import workloads
+
+        self.data = workloads.generate_narration("n", users=3, script_users=2, segments=(20, 30), retakes=5, seed=3)
+        self.path = self.write("n.json", self.data)
+
+    def test_generator_is_deterministic_and_valid(self):
+        from gpu_bench import workloads
+        from gpu_bench.compare import check_jobs
+
+        again = workloads.generate_narration("n", users=3, script_users=2, segments=(20, 30), retakes=5, seed=3)
+        self.assertEqual(again, self.data)
+        check_jobs(self.data, "n")
+        arrivals = [job["arrival_ms"] for job in self.data["jobs"]]
+        self.assertEqual(arrivals, sorted(arrivals))
+        kinds = {job["kind"] for job in self.data["jobs"]}
+        self.assertEqual(kinds, {"script_segment", "retake"})
+        for user in ("user-1", "user-2"):
+            burst = {job["arrival_ms"] for job in self.data["jobs"] if job["user"] == user and job["kind"] == "script_segment"}
+            self.assertEqual(len(burst), 1)
+
+    def test_traffic_generator(self):
+        from gpu_bench import workloads
+        from gpu_bench.compare import check_jobs
+
+        for pattern in workloads.PATTERNS:
+            data = workloads.generate_traffic("t", count=50, pattern=pattern, seed=1)
+            check_jobs(data, "t")
+            self.assertEqual(len(data["jobs"]), 50)
+
+    def test_fair_schedulers_rescue_retakes(self):
+        model = MODELS / "example-tts.json"
+        schedulers = [(name, SCHEDULERS / f"{name}.py") for name in ("fifo", "fair_share", "retake_first")]
+        result = runner.execute(self.path, model, schedulers)
+        retake = {item["name"]: item["summary"]["by_kind"]["retake"]["mean_latency_ms"] for item in result["results"]}
+        self.assertLess(retake["fair_share"], retake["fifo"] / 3)
+        self.assertLess(retake["retake_first"], retake["fifo"] / 3)
+
+    def test_by_kind_matches_overall(self):
+        result = runner.execute(self.path, MODELS / "example-tts.json", FIFO)
+        summary = result["results"][0]["summary"]
+        kinds = summary["by_kind"]
+        self.assertEqual(sum(stats["count"] for stats in kinds.values()), len(self.data["jobs"]))
+        weighted = sum(stats["mean_latency_ms"] * stats["count"] for stats in kinds.values()) / len(self.data["jobs"])
+        self.assertAlmostEqual(weighted, summary["mean_latency_ms"])
+        self.assertIn("retake (5)", runner.format_result(result))
+
+    def test_retake_first_does_not_starve_segments(self):
+        sys.path.insert(0, str(SCHEDULERS))
+        import retake_first
+
+        old = {"id": "s", "kind": "script_segment", "arrival_ms": 0}
+        new = {"id": "r", "kind": "retake", "arrival_ms": 700000}
+        self.assertIs(retake_first.select([old, new], 700000), old)
+        fresh = {"id": "r2", "kind": "retake", "arrival_ms": 1000}
+        self.assertIs(retake_first.select([old, fresh], 1000), fresh)
+
+
+class CalibrateTests(TempHome):
+    def test_recovers_coefficients(self):
+        from gpu_bench import calibrate
+
+        jobs = [{"id": f"j{i}", "arrival_ms": 0, "input": {"text": "x" * (10 + 7 * i)}} for i in range(30)]
+        records = [{"id": job["id"], "service_ms": 50 + 2.5 * len(job["input"]["text"])} for job in jobs]
+        result = {
+            "mode": "live", "created": "now", "gpus": [{"name": "Test GPU"}],
+            "workload": {"name": "w", "jobs": jobs},
+            "model": {"name": "m", "runtime": {"base_ms": 1, "per_character_ms": 1, "text_field": "text"}},
+            "results": [{"name": "fifo", "summary": {"mean_latency_ms": 1}, "jobs": records}],
+        }
+        fitted = calibrate.fit(result)
+        self.assertAlmostEqual(fitted["base_ms"], 50, places=6)
+        self.assertAlmostEqual(fitted["per_unit_ms"], 2.5, places=6)
+        self.assertAlmostEqual(fitted["r2"], 1.0)
+        model = calibrate.calibrated_model(result, fitted)
+        self.assertEqual(model["runtime"]["per_character_ms"], 2.5)
+        self.assertEqual(model["name"], "m-calibrated")
+
+    def test_rejects_simulations(self):
+        from gpu_bench import calibrate
+
+        with self.assertRaisesRegex(ValueError, "live"):
+            calibrate.fit({"mode": "simulate"})
+
+
 class RemoteTests(TempHome):
     def test_bundle_ships_backend_files(self):
         self.write("b.py", "def infer(s, j): pass\n")

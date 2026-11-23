@@ -109,6 +109,7 @@ def run_schedule(jobs, select, model, scheduler_name):
                 "wait_ms": start - arrival,
                 "finish_ms": finish,
                 "service_ms": service,
+                **job_tags(choice),
             }
         )
         now = finish
@@ -116,18 +117,38 @@ def run_schedule(jobs, select, model, scheduler_name):
     return finished
 
 
+def job_tags(job):
+    """The optional user and kind of a job, copied onto its result so reports can group by them."""
+    return {key: job[key] for key in ("kind", "user") if job.get(key) is not None}
+
+
 def summarize(finished):
-    """Mean latency, nearest-rank p95 latency, mean wait, and jobs per second."""
-    latencies = [job["latency_ms"] for job in finished]
-    waits = [job["wait_ms"] for job in finished]
+    """Mean latency, nearest-rank p95 latency, mean wait, and jobs per second.
+
+    When jobs have a "kind" (for example script_segment and retake), by_kind holds
+    the same latency numbers for each kind, since one average hides who waited.
+    """
     count = len(finished)
     makespan_ms = max(job["finish_ms"] for job in finished)
     jobs_per_s = 0.0 if makespan_ms <= 0 else count / (makespan_ms / 1000)
+    summary = _latency_stats(finished)
+    summary["jobs_per_s"] = jobs_per_s
+    kinds = {}
+    for job in finished:
+        if "kind" in job:
+            kinds.setdefault(str(job["kind"]), []).append(job)
+    if kinds:
+        summary["by_kind"] = {kind: dict(_latency_stats(jobs), count=len(jobs)) for kind, jobs in sorted(kinds.items())}
+    return summary
+
+
+def _latency_stats(finished):
+    latencies = [job["latency_ms"] for job in finished]
+    waits = [job["wait_ms"] for job in finished]
     return {
-        "mean_latency_ms": sum(latencies) / count,
+        "mean_latency_ms": sum(latencies) / len(latencies),
         "p95_latency_ms": _nearest_rank(latencies, 0.95),
-        "mean_wait_ms": sum(waits) / count,
-        "jobs_per_s": jobs_per_s,
+        "mean_wait_ms": sum(waits) / len(waits),
     }
 
 

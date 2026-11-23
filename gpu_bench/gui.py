@@ -60,6 +60,11 @@ def main():
         return 1
     app = QApplication(sys.argv)
     app.setApplicationName("GPU Inference Scheduler")
+    icon = Path(__file__).resolve().parent / "assets" / "icon.png"
+    if icon.is_file():
+        from PySide6.QtGui import QIcon
+
+        app.setWindowIcon(QIcon(str(icon)))
     window = Window()
     window.resize(1200, 760)
     window.show()
@@ -170,6 +175,119 @@ if Qt is not None:
         trust_host_key(exc)
         return True
 
+    class NewWorkloadDialog(QDialog):
+        """Generate a workload file into ~/.gpu_bench/workloads."""
+
+        def __init__(self, parent, models, model_name=None):
+            super().__init__(parent)
+            self.setWindowTitle("New workload")
+            self.created = None
+            self.models = models
+            self.name = QLineEdit("narration-busy")
+            self.preset = QComboBox()
+            self.preset.addItem("Narration: scripts + retakes", "narration")
+            self.preset.addItem("Traffic: steady / bursty / ramp", "traffic")
+            self.model = QComboBox()
+            for item in models:
+                self.model.addItem(item["name"])
+            default = model_name if model_name and "tts" in model_name else "example-tts"
+            if self.model.findText(default) >= 0:
+                self.model.setCurrentText(default)
+            self.seed = _spin(1, 999999, 7)
+
+            self.users = _spin(1, 100, 4)
+            self.script_users = _spin(1, 100, 2)
+            self.seg_min = _spin(1, 5000, 100)
+            self.seg_max = _spin(1, 5000, 400)
+            self.retakes = _spin(0, 5000, 20)
+            self.count = _spin(1, 100000, 200)
+            self.rate = _spin(1, 1000, 4)
+            self.pattern = QComboBox()
+            self.pattern.addItems(["steady", "bursty", "ramp"])
+            self.field = QComboBox()
+            self.field.addItem("max_tokens (language model)", "max_tokens")
+            self.field.addItem("text (speech)", "text")
+
+            form = QFormLayout()
+            form.addRow("Name", self.name)
+            form.addRow("Kind", self.preset)
+            form.addRow("Model", self.model)
+            self.narration_rows = [("Users sharing the GPU", self.users), ("Users with a full script", self.script_users),
+                                   ("Lines per script, min", self.seg_min), ("Lines per script, max", self.seg_max),
+                                   ("Single-line retakes", self.retakes)]
+            self.traffic_rows = [("Requests", self.count), ("Requests per second", self.rate),
+                                 ("Arrivals", self.pattern), ("Size", self.field)]
+            for label, widget in self.narration_rows + self.traffic_rows:
+                form.addRow(label, widget)
+            form.addRow("Seed", self.seed)
+            self.form = form
+            self.preset.currentIndexChanged.connect(self._preset_changed)
+            self._preset_changed()
+
+            note = QLabel("Narration: each script arrives at once as one request per sentence, while other users "
+                          "wait on single-line retakes. Saved to ~/.gpu_bench/workloads.")
+            note.setWordWrap(True)
+            note.setStyleSheet("color: gray")
+            buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+            buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Create")
+            buttons.accepted.connect(self._create)
+            buttons.rejected.connect(self.reject)
+            layout = QVBoxLayout(self)
+            layout.addLayout(form)
+            layout.addWidget(note)
+            layout.addWidget(buttons)
+
+        def _preset_changed(self, *_args):
+            narration = self.preset.currentData() == "narration"
+            for _label, widget in self.narration_rows:
+                self.form.setRowVisible(widget, narration)
+            for _label, widget in self.traffic_rows:
+                self.form.setRowVisible(widget, not narration)
+            self.adjustSize()
+
+        def _create(self):
+            import json
+
+            from gpu_bench import workloads
+            from gpu_bench.compare import load_json
+            from gpu_bench.store import SAFE_NAME, user_dir
+
+            name = self.name.text().strip()
+            if not SAFE_NAME.match(name):
+                QMessageBox.warning(self, "Bad name", "Use letters, digits, dot, dash, and underscore.")
+                return
+            path = user_dir("workloads") / f"{name}.json"
+            if path.exists() and QMessageBox.question(self, "Replace", f"{name} exists. Replace it?") != QMessageBox.StandardButton.Yes:
+                return
+            item = next((m for m in self.models if m["name"] == self.model.currentText()), None)
+            model = load_json(item["path"]) if item else None
+            model_name = item["name"] if item else None
+            try:
+                if self.preset.currentData() == "narration":
+                    data = workloads.generate_narration(
+                        name, self.users.value(), self.script_users.value(),
+                        (self.seg_min.value(), self.seg_max.value()), self.retakes.value(),
+                        model=model, model_name=model_name, seed=self.seed.value(),
+                    )
+                else:
+                    data = workloads.generate_traffic(
+                        name, self.count.value(), float(self.rate.value()), self.pattern.currentText(),
+                        self.field.currentData(), model=model, model_name=model_name, seed=self.seed.value(),
+                    )
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            except (ValueError, OSError) as exc:
+                QMessageBox.warning(self, "Can't create workload", str(exc))
+                return
+            self.created = name
+            self.accept()
+
+    def _spin(low, high, value):
+        box = QSpinBox()
+        box.setRange(low, high)
+        box.setValue(value)
+        return box
+
     class Timeline(QWidget):
         """One lane per scheduler. Each bar is a request on the GPU. Hover a bar for details."""
 
@@ -212,7 +330,7 @@ if Qt is not None:
                 for job in item.get("jobs", []):
                     x = label_w + plot_w * job["start_ms"] / makespan
                     width = max(1.0, plot_w * (job["finish_ms"] - job["start_ms"]) / makespan)
-                    color = _bar_color(job["id"])
+                    color = _job_color(job)
                     painter.fillRect(int(x), y, max(1, int(width) - 1), lane_h, color)
                     self._bars.append((int(x), y, int(width), lane_h, item["name"], job))
                     if width >= 48:
@@ -606,9 +724,15 @@ if Qt is not None:
             sched_head.addWidget(all_btn)
             sched_head.addWidget(none_btn)
 
-            add = QPushButton("Add your own file...")
+            add = QPushButton("Add file...")
             add.setToolTip("A workload or model (.json) or a scheduler (.py). It stays in the lists next time.")
             add.clicked.connect(self._add_file)
+            new_workload = QPushButton("New workload...")
+            new_workload.setToolTip("Generate narration traffic (scripts + retakes) or generic request traffic.")
+            new_workload.clicked.connect(self._new_workload)
+            file_row = QHBoxLayout()
+            file_row.addWidget(new_workload)
+            file_row.addWidget(add)
 
             self.run_btn = QPushButton("Run")
             self.run_btn.setDefault(True)
@@ -637,7 +761,7 @@ if Qt is not None:
             column.addWidget(self.model_hint)
             column.addLayout(sched_head)
             column.addWidget(self.schedulers, 1)
-            column.addWidget(add)
+            column.addLayout(file_row)
             column.addLayout(buttons)
             column.addWidget(self.progress)
             column.addWidget(self.status)
@@ -667,8 +791,13 @@ if Qt is not None:
             export.setMenu(menu)
             self.export_btn = export
             export.setEnabled(False)
+            self.calibrate_btn = QPushButton("Calibrate model...")
+            self.calibrate_btn.setToolTip("Fit the model's runtime formula to the GPU times this live run measured.")
+            self.calibrate_btn.setEnabled(False)
+            self.calibrate_btn.clicked.connect(self._calibrate)
             head = QHBoxLayout()
             head.addWidget(self.headline, 1)
+            head.addWidget(self.calibrate_btn)
             head.addWidget(export)
             results = QWidget()
             layout = QVBoxLayout(results)
@@ -678,6 +807,33 @@ if Qt is not None:
             layout.addWidget(QLabel("Schedule (hover a bar for details)"))
             layout.addWidget(scroll, 2)
             self.tabs.addTab(results, "Results")
+
+            # charts
+            from gpu_bench.charts import ALL, LatencyBars, LatencyCDF
+
+            self.bars = LatencyBars()
+            self.cdf = LatencyCDF()
+            self.chart_kind = QComboBox()
+            self.chart_kind.addItem(ALL)
+            self.chart_kind.currentTextChanged.connect(self.cdf.set_kind)
+            save_png = QPushButton("Save as PNG...")
+            save_png.clicked.connect(self._save_charts)
+            self.charts_box = QWidget()
+            self.charts_box.setAutoFillBackground(True)
+            box = QVBoxLayout(self.charts_box)
+            box.setContentsMargins(0, 0, 0, 0)
+            box.addWidget(self.bars, 1)
+            box.addWidget(self.cdf, 1)
+            charts = QWidget()
+            layout = QVBoxLayout(charts)
+            row = QHBoxLayout()
+            row.addWidget(QLabel("Distribution for"))
+            row.addWidget(self.chart_kind)
+            row.addStretch(1)
+            row.addWidget(save_png)
+            layout.addLayout(row)
+            layout.addWidget(self.charts_box, 1)
+            self.tabs.addTab(charts, "Charts")
 
             # jobs
             self.job_scheduler = QComboBox()
@@ -816,6 +972,62 @@ if Qt is not None:
                 self._save_settings()
             self._reload_catalog()
             self.status.setText(f"Added {item['kind']} {item['name']}.")
+
+        def _new_workload(self):
+            dialog = NewWorkloadDialog(self, self._models, self._current_model_name())
+            if dialog.exec() != QDialog.DialogCode.Accepted or dialog.created is None:
+                return
+            self._reload_catalog()
+            names = [item["name"] for item in self._workloads]
+            if dialog.created in names:
+                self.workloads.setCurrentRow(names.index(dialog.created))
+            self.status.setText(f"Created workload {dialog.created}.")
+
+        def _current_model_name(self):
+            model = _current(self.models, self._models)
+            return model["name"] if model else None
+
+        def _calibrate(self):
+            import json
+
+            from gpu_bench import calibrate
+            from gpu_bench.store import user_dir
+
+            if not self.result:
+                return
+            try:
+                coefficients = calibrate.fit(self.result)
+                model = calibrate.calibrated_model(self.result, coefficients)
+                rows = calibrate.check(self.result, model)
+            except (ValueError, KeyError) as exc:
+                QMessageBox.warning(self, "Can't calibrate", str(exc))
+                return
+            box = QMessageBox(self)
+            box.setWindowTitle("Calibrated model")
+            box.setText(f"Save {model['name']} so simulations behave like this hardware?")
+            box.setInformativeText(calibrate.format_report(coefficients, rows))
+            box.setStyleSheet("QLabel { font-family: Consolas, 'Courier New', monospace; }")
+            box.setStandardButtons(QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Cancel)
+            if box.exec() != QMessageBox.StandardButton.Save:
+                return
+            path = user_dir("models") / f"{model['name']}.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(model, indent=2), encoding="utf-8")
+            self._reload_catalog()
+            self.status.setText(f"Saved {model['name']}. Pick it and Simulate to test policies in seconds.")
+
+        def _save_charts(self):
+            if not self.result:
+                QMessageBox.information(self, "Nothing to save", "Run a comparison first.")
+                return
+            name = self.result.get("workload", {}).get("name", "run")
+            path, _ = QFileDialog.getSaveFileName(self, "Save charts", str(Path.home() / f"{name}-charts.png"), "PNG (*.png)")
+            if not path:
+                return
+            if not self.charts_box.grab().save(path, "PNG"):
+                QMessageBox.warning(self, "Save failed", f"Could not write {path}")
+                return
+            self.status.setText(f"Wrote {path}")
 
         # machine ------------------------------------------------------
 
@@ -1031,7 +1243,7 @@ if Qt is not None:
             first = message.strip().splitlines()[0] if message.strip() else "failed"
             self.status.setText(f"{first}  (details in the Log tab)" if "\n" in message.strip() else first)
             if message != "Stopped.":
-                self.tabs.setCurrentIndex(2)
+                self.tabs.setCurrentWidget(self.log)
 
         def _run_finished(self):
             self.run_btn.setEnabled(True)
@@ -1064,18 +1276,25 @@ if Qt is not None:
             self.table.clear()
             self.table.setColumnCount(len(headers))
             self.table.setHorizontalHeaderLabels(headers)
-            self.table.setRowCount(len(rows))
+            table_rows = []
+            for item in rows:
+                table_rows.append((item["name"], item["summary"], False))
+                for kind, stats in (item["summary"].get("by_kind") or {}).items():
+                    table_rows.append((f"    {kind} ({stats['count']:.0f})", stats, True))
+            self.table.setRowCount(len(table_rows))
             best_mean = lowest(rows, "mean_latency_ms")[1] if len(rows) > 1 else []
-            for row, item in enumerate(rows):
+            dim = self.palette().color(self.foregroundRole())
+            dim.setAlpha(150)
+            for row, (name, summary, sub) in enumerate(table_rows):
                 for column, key in enumerate(keys):
                     if key is None:
-                        cell = QTableWidgetItem(item["name"])
-                        if item["name"] in best_mean:
+                        cell = QTableWidgetItem(name)
+                        if name in best_mean and not sub:
                             font = cell.font()
                             font.setBold(True)
                             cell.setFont(font)
                     else:
-                        value = item["summary"].get(key)
+                        value = summary.get(key)
                         if value is None:
                             text = "-"
                         elif key == "jobs_per_s":
@@ -1084,10 +1303,24 @@ if Qt is not None:
                             text = f"{value:.0f}"
                         else:
                             text = f"{value:.1f}"
-                        cell = QTableWidgetItem(text)
+                        cell = QTableWidgetItem("" if sub and value is None else text)
                         cell.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                    if sub:
+                        cell.setForeground(dim)
                     self.table.setItem(row, column, cell)
             self.table.resizeColumnsToContents()
+            self.calibrate_btn.setEnabled(result.get("mode") == "live")
+            self.bars.set_result(result)
+            self.cdf.set_result(result)
+            from gpu_bench.charts import ALL, kinds_of
+
+            current = self.chart_kind.currentText()
+            self.chart_kind.blockSignals(True)
+            self.chart_kind.clear()
+            self.chart_kind.addItems([ALL, *kinds_of(result)])
+            self.chart_kind.setCurrentText(current if current in [ALL, *kinds_of(result)] else ALL)
+            self.chart_kind.blockSignals(False)
+            self.cdf.set_kind(self.chart_kind.currentText())
 
             where = result.get("target", "local")
             where = "this computer" if where == "local" else where
@@ -1110,6 +1343,12 @@ if Qt is not None:
                                    ("mean_wait_ms", "mean wait")):
                     best, names = lowest(rows, key)
                     notes.append(f"Lowest {label}: {', '.join(names)} ({best:.1f} ms)")
+                for kind in sorted({k for item in rows for k in (item["summary"].get("by_kind") or {})}):
+                    scored = [(item["summary"]["by_kind"][kind]["mean_latency_ms"], item["name"])
+                              for item in rows if kind in (item["summary"].get("by_kind") or {})]
+                    best, worst = min(scored), max(scored)
+                    factor = f", {worst[0] / best[0]:.1f}x faster than {worst[1]}" if best[0] > 0 and worst[0] > best[0] * 1.05 else ""
+                    notes.append(f"Lowest mean latency for {kind}: {best[1]} ({best[0]:.1f} ms{factor})")
             notes.append("mean_ms and p95_ms are latency from arrival to finish. wait_ms is time spent waiting.")
             self.note.setText("\n".join(notes))
             self.timeline.set_results(rows)
@@ -1319,6 +1558,19 @@ def _checked(widget, items):
         if row is not None and row.checkState() == Qt.CheckState.Checked:
             chosen.append(item)
     return chosen
+
+
+_USER_COLORS = ("#9ecae9", "#a6d8a0", "#d4b9da", "#c7c7c7", "#fdd0a2", "#b4d8d5")
+
+
+def _job_color(job):
+    """Retakes stand out in red; other jobs are colored by user (muted), or by id without users."""
+    if job.get("kind") == "retake":
+        return QColor("#d62728")
+    if job.get("user"):
+        total = sum(ord(char) for char in str(job["user"]))
+        return QColor(_USER_COLORS[total % len(_USER_COLORS)]).darker(115)
+    return _bar_color(job["id"])
 
 
 def _bar_color(job_id):

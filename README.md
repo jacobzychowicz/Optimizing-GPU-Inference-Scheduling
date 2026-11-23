@@ -1,10 +1,27 @@
 # GPU Inference Scheduler
 
-Compare scheduling policies for a GPU inference model: run the same workload through each scheduler and see which gives the best latency, wait, throughput, and GPU use.
+[![tests](https://github.com/jacobzychowicz/Optimizing-GPU-Inference-Scheduling/actions/workflows/tests.yml/badge.svg)](https://github.com/jacobzychowicz/Optimizing-GPU-Inference-Scheduling/actions/workflows/tests.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-- **Simulate**: instant, computed from the model's runtime formula. No GPU needed.
-- **Live on GPU**: replays the workload in real time on a real backend (your Python code, your inference server, or a built-in PyTorch load generator) and samples GPU use.
-- **Over SSH**: either mode on a remote server. The server needs only Python 3.8+.
+**Which request should the GPU run next?** This tool replays realistic inference traffic through different scheduling policies, simulated or live on a real GPU (local or over SSH), and shows who waited.
+
+It started with a voice-cloning narration app, [RecapVox](docs/results.md). A long script becomes hundreds of TTS requests at once, and with first-come-first-served, another user's one-line retake waits behind all of them:
+
+![Timeline: red bars are one-line retakes. FIFO leaves them at the back; fair share slots them in.](docs/images/timeline.png)
+
+| scheduler | retake wait (mean) | script segments (mean) | throughput |
+| --- | ---: | ---: | ---: |
+| fifo | 13.8 s | 10.7 s | same |
+| **fair_share** | **0.65 s (21× faster)** | 12.3 s | same |
+
+<sub>Simulated `narration-small` workload; see [docs/results.md](docs/results.md) for the full comparison and the live GPU run.</sub>
+
+**What it does**
+- **Simulate** in milliseconds from a model's runtime formula, or **calibrate** that formula from a real GPU run so the simulation matches the hardware.
+- **Live on GPU**: replays arrivals in real time on a real backend (voice-cloning XTTS-v2, your own Python model or server process, or a PyTorch load generator) and samples GPU busy % and memory.
+- **Over SSH**: runs on any Linux GPU server with Python 3.8+. Nothing gets installed there. Log in with keys or a saved password.
+- **Generates traffic**: narration bursts and retakes, or steady, bursty, and ramping request streams.
+- **Desktop app** (PySide6, with a Windows .exe) with charts, a per-request timeline, history, and CSV/JSON/PNG export, plus a full CLI.
 
 Scheduling is non-preemptive and request-level: whenever the GPU is free, the scheduler picks which waiting request runs next.
 
@@ -14,7 +31,7 @@ Scheduling is non-preemptive and request-level: whenever the GPU is free, the sc
 
 | You want | Do this |
 | --- | --- |
-| Just the desktop app (Windows) | Download `GPU-Inference-Scheduler.exe` from this repo and double-click it. Nothing else to install. |
+| Just the desktop app (Windows) | Download `GPU-Inference-Scheduler.exe` from [Releases](https://github.com/jacobzychowicz/Optimizing-GPU-Inference-Scheduling/releases/latest) and double-click it. Nothing else to install. |
 | Everything (any OS) | `git clone https://github.com/jacobzychowicz/Optimizing-GPU-Inference-Scheduling.git` with Python 3.8+ installed. |
 
 ### 2. Install what you need (Python install only)
@@ -25,12 +42,13 @@ The command line works with no packages at all. Add only what you use:
 | --- | --- | --- |
 | PySide6 | the desktop window | `pip install -r requirements-gui.txt` (installs all three) |
 | paramiko, keyring | SSH hosts that log in with a password | |
-| PyTorch | live runs of the `synthetic-gpu` model on this machine | [pytorch.org](https://pytorch.org/get-started/locally/) (choose a CUDA build) |
+| PyTorch | live runs of `synthetic-gpu` or `xtts` on that machine | [pytorch.org](https://pytorch.org/get-started/locally/) (choose a CUDA build) |
+| coqui-tts | the `xtts` voice-cloning model, on the GPU machine | `pip install coqui-tts`, then accept the [model license](https://coqui.ai/cpml) by setting `"agree_to_cpml": true` in `defaults/models/xtts.json` |
 
 ### 3. Check it works
 
 ```
-python -m gpu_bench mixed-lengths fifo priority    # simulation: prints a comparison table
+python -m gpu_bench narration-small fifo fair_share retake_first   # simulation: prints a comparison table
 python -m gpu_bench gpus                           # lists GPUs, driver, and PyTorch/CUDA
 python -m gpu_bench gui                            # opens the window
 ```
@@ -43,6 +61,14 @@ On Linux/macOS you can also `chmod +x gpu-bench` and use `./gpu-bench` in place 
 
 ```
 python -m gpu_bench token-mix --model synthetic-gpu --live --repeat 3
+```
+
+**The narration benchmark** (on the GPU machine, or add `--host NAME`):
+
+```
+python -m gpu_bench generate narration-busy --users 4 --segments 100 300 --retakes 20 --model xtts
+python -m gpu_bench narration-busy fifo shortest_predicted fair_share retake_first --model xtts --live --repeat 3 --save
+python -m gpu_bench calibrate 1 --save     # fit the simulator to the GPU; prints simulated-vs-live error
 ```
 
 **A remote server**: needs SSH access and Python 3.8+ on a Linux/macOS server. Nothing is installed there: each run copies the app over, runs it, streams results back, and cleans up.
@@ -68,7 +94,11 @@ Notes:
 
 ## Using it
 
-**Desktop window**: choose **Run on** (this computer or a host), **Simulate** or **Live on GPU**, then a workload, a model, and schedulers, and press **Run**. Results show as a table, the best scheduler for each metric, and a timeline (hover for details). Tabs: **Jobs** (per request), **Log**, and **History** (every run, saved automatically). Export to CSV/JSON from Results or History. **Add your own file...** adds workloads, models, or schedulers from anywhere on disk.
+**Desktop window**: choose **Run on** (this computer or a host), **Simulate** or **Live on GPU**, then a workload, a model, and schedulers, and press **Run**.
+- **Results** shows a table (with retake and script-segment rows when the workload has kinds), the best scheduler for each metric, and a timeline (hover for details). **Calibrate model...** fits the simulator to a live run.
+- **Charts** shows latency bars and a latency distribution curve. **Save as PNG...** exports them.
+- **Jobs** lists every request, **Log** shows progress, and **History** keeps every run automatically. Export CSV/JSON from Results or History.
+- **New workload...** generates traffic. **Add file...** brings in your own workloads, models, or schedulers.
 
 **Terminal menu**: `python -m gpu_bench` with no arguments, in a terminal.
 
@@ -88,6 +118,8 @@ python -m gpu_bench <workload> [scheduler ...]    compare
 python -m gpu_bench gpus [--host NAME]
 python -m gpu_bench hosts [list | add | remove | test]
 python -m gpu_bench history [list | show N | export N FILE]
+python -m gpu_bench generate NAME [--preset narration|traffic] ...
+python -m gpu_bench calibrate N [--save]
 ```
 
 A file path works anywhere a name works. Add `-h` to any command for every option.
@@ -99,11 +131,12 @@ Put them in `~/.gpu_bench/workloads`, `models`, or `schedulers` and they appear 
 **Workload**: requests arriving over time.
 
 ```json
-{ "name": "my-load", "model": "example-llm",
-  "jobs": [ { "id": "a", "arrival_ms": 0, "priority": 1, "predicted_duration_ms": 430, "input": { "max_tokens": 16 } } ] }
+{ "name": "my-load", "model": "example-tts",
+  "jobs": [ { "id": "a", "arrival_ms": 0, "user": "alice", "kind": "retake", "priority": 2,
+              "predicted_duration_ms": 400, "input": { "text": "One line to fix." } } ] }
 ```
 
-`priority`: higher runs first (missing means 0). `predicted_duration_ms`: what a scheduler sees before a request runs. `input`: what the model reads.
+`priority`: higher runs first (missing means 0). `predicted_duration_ms`: what a scheduler sees before a request runs. `input`: what the model reads. `user` and `kind` are optional: schedulers can use them (`fair_share` balances users), and reports break latency down by `kind`. Or generate a workload with `generate`.
 
 **Scheduler**: one function. Don't modify `ready`.
 
@@ -131,13 +164,13 @@ Paths are relative to the model file. For SSH runs, relative backend files are c
 
 | | |
 | --- | --- |
-| Workloads | `mixed-lengths` (long TTS request blocking short ones), `priority-mix` (equal lengths, mixed priorities), `token-mix` (long LLM generation, then short ones) |
-| Models | `example-tts`, `example-llm` (formula only), `synthetic-gpu` (real PyTorch GPU load), `example-worker` (worker template) |
-| Schedulers | `fifo`, `shortest_predicted`, `priority`, `aging` (priority that grows with waiting time) |
+| Workloads | `narration-small` (2 scripts + 8 retakes from other users), `mixed-lengths`, `priority-mix`, `token-mix` |
+| Models | `example-tts`, `example-llm` (formula only), `xtts` (real voice cloning, XTTS-v2), `synthetic-gpu` (PyTorch GPU load), `example-worker` (worker template) |
+| Schedulers | `fifo`, `shortest_predicted`, `priority`, `aging`, `fair_share` (smallest backlog per user first), `retake_first` (earliest deadline: retakes 2 s, segments 10 min) |
 
 ## What a run reports
 
-Per scheduler: mean and p95 latency (arrival to finish), mean wait, and jobs/s. Live runs add GPU busy % and peak memory (NVIDIA), plus the spread across repeats.
+Per scheduler: mean and p95 latency (arrival to finish), mean wait, and jobs/s, overall and per request `kind`. Live runs add GPU busy % and peak memory (NVIDIA), plus the spread across repeats.
 
 Typical trade-offs: shortest-job wins on average latency but makes long requests wait; strict priority can starve low-priority work; aging balances the two.
 
@@ -145,7 +178,8 @@ Typical trade-offs: shortest-job wins on average latency but makes long requests
 
 ```
 python -m unittest discover tests                  # tests
-pip install pyinstaller && python build_exe.py     # rebuild GPU-Inference-Scheduler.exe
+pip install pyinstaller && python build_exe.py     # build GPU-Inference-Scheduler.exe (attach it to a GitHub Release)
+python docs/make_images.py [result.json]           # regenerate the icon and README images
 ```
 
 Planned: batching and concurrent slots per GPU, preemptive and dynamic policies.
