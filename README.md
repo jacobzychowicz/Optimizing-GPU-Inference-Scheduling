@@ -1,226 +1,151 @@
 # GPU Inference Scheduler
 
-Find out which scheduling policy serves your GPU model best — on a simulation, on the GPU in front of you, or on a GPU server over SSH.
+Compare scheduling policies for a GPU inference model: run the same workload through each scheduler and see which gives the best latency, wait, throughput, and GPU use.
 
-You pick a workload (requests arriving over time), a model, and one or more schedulers. The app runs that same workload through each scheduler and reports latency, wait, throughput, and GPU use for each, with a timeline of what ran when.
+- **Simulate**: instant, computed from the model's runtime formula. No GPU needed.
+- **Live on GPU**: replays the workload in real time on a real backend (your Python code, your inference server, or a built-in PyTorch load generator) and samples GPU use.
+- **Over SSH**: either mode on a remote server. The server needs only Python 3.8+.
 
-- **Simulate** — instant. The schedule is computed from the model's runtime formula. No GPU needed.
-- **Live on GPU** — the workload is replayed on a real clock and each request runs on the model's backend: your own Python code, your own inference server process, or the built-in PyTorch load generator. GPU busy % and peak memory are sampled with `nvidia-smi`.
-- **Over SSH** — any of the above on a remote machine. The server needs only Python 3.8+; nothing is installed there. Each run sends the app and your files over one SSH connection, streams progress back, and cleans up after itself.
+Scheduling is non-preemptive and request-level: whenever the GPU is free, the scheduler picks which waiting request runs next.
 
-Scheduling is non-preemptive and request-level: when the GPU is free, the scheduler chooses which waiting request runs next.
+## Setup
 
-## Quick start
+### 1. Get the app
+
+| You want | Do this |
+| --- | --- |
+| Just the desktop app (Windows) | Download `GPU-Inference-Scheduler.exe` from this repo and double-click it. Nothing else to install. |
+| Everything (any OS) | `git clone https://github.com/jacobzychowicz/Optimizing-GPU-Inference-Scheduling.git` with Python 3.8+ installed. |
+
+### 2. Install what you need (Python install only)
+
+The command line works with no packages at all. Add only what you use:
+
+| Package | Needed for | Install |
+| --- | --- | --- |
+| PySide6 | the desktop window | `pip install -r requirements-gui.txt` (installs all three) |
+| paramiko, keyring | SSH hosts that log in with a password | |
+| PyTorch | live runs of the `synthetic-gpu` model on this machine | [pytorch.org](https://pytorch.org/get-started/locally/) (choose a CUDA build) |
+
+### 3. Check it works
 
 ```
-python -m gpu_bench gui                      # desktop window (pip install PySide6)
-python -m gpu_bench                          # terminal menu
-python -m gpu_bench mixed-lengths fifo priority
+python -m gpu_bench mixed-lengths fifo priority    # simulation: prints a comparison table
+python -m gpu_bench gpus                           # lists GPUs, driver, and PyTorch/CUDA
+python -m gpu_bench gui                            # opens the window
 ```
 
-Real GPU, this machine (needs PyTorch with CUDA or Apple MPS):
+On Linux/macOS you can also `chmod +x gpu-bench` and use `./gpu-bench` in place of `python -m gpu_bench`.
+
+### 4. Run on a GPU
+
+**This machine** (NVIDIA + CUDA PyTorch, or Apple MPS):
 
 ```
-python -m gpu_bench gpus                                     # what GPUs and PyTorch are there
 python -m gpu_bench token-mix --model synthetic-gpu --live --repeat 3
 ```
 
-Real GPU, a server:
+**A remote server**: needs SSH access and Python 3.8+ on a Linux/macOS server. Nothing is installed there: each run copies the app over, runs it, streams results back, and cleans up.
 
 ```
+# Key login (uses your ssh keys, agent, and ~/.ssh/config). Connect once with `ssh` first to accept the host key.
 python -m gpu_bench hosts add gpu-box alice@10.0.0.5 --python /opt/venv/bin/python
-python -m gpu_bench hosts test gpu-box
+
+# Password login: asked each time, or --save-password to keep it in Windows Credential Manager / Keychain
+python -m gpu_bench hosts add lab bob@lab.example.edu --password --save-password
+
+python -m gpu_bench hosts test gpu-box                                   # connect and show its GPUs
 python -m gpu_bench token-mix --model synthetic-gpu --live --host gpu-box --save
 ```
 
-On Linux and macOS, `chmod +x gpu-bench` once and `./gpu-bench` is the same command.
+In the window, the same steps are under **Run on → Manage hosts... → Test connection**.
 
-## Desktop window
+Notes:
+- Key logins on Windows need the OpenSSH client (Settings → Optional features).
+- A password login shows a new server's key fingerprint once and asks you to trust it. A saved password the server rejects is deleted, and you're asked again.
+- For scripts with no terminal, set `GPU_BENCH_SSH_PASSWORD`.
+- The `.exe` has no PyTorch, so `synthetic-gpu` runs live only on SSH hosts. Worker backends need Python installed.
 
-```
-pip install PySide6
-python -m gpu_bench gui
-```
+## Using it
 
-- **Run on** — *This computer* or any saved SSH host. *Manage hosts...* adds, edits, and tests hosts, with key or password login. A password that isn't saved is asked for once per session. *Check GPUs* shows the GPUs, driver, and PyTorch on the chosen machine.
-- **Mode** — *Simulate* or *Live on GPU*, and how many repeats to average for live runs.
-- Pick a workload (its usual model is selected for you), a model, and schedulers. *Add your own file...* adds a workload, model, or scheduler from anywhere on disk; it stays in the lists next time.
-- **Run** works in the background, with a progress bar and the timeline filling in as requests finish. **Stop** ends a live run after the current request.
-- Tabs: **Results** (table, winner per metric, timeline — hover a bar for details, *Export...* to CSV/JSON), **Jobs** (every request for one scheduler, sortable), **Log**, and **History** (every finished run, saved automatically; open, export, or delete).
+**Desktop window**: choose **Run on** (this computer or a host), **Simulate** or **Live on GPU**, then a workload, a model, and schedulers, and press **Run**. Results show as a table, the best scheduler for each metric, and a timeline (hover for details). Tabs: **Jobs** (per request), **Log**, and **History** (every run, saved automatically). Export to CSV/JSON from Results or History. **Add your own file...** adds workloads, models, or schedulers from anywhere on disk.
 
-## Terminal menu
+**Terminal menu**: `python -m gpu_bench` with no arguments, in a terminal.
 
-`python -m gpu_bench` in a terminal opens a menu:
+**Commands**:
 
 ```
-1  model
-2  workload
-3  schedulers
-4  run
-5  legacy command line
-6  switch simulate / live
-7  machine (this one or an SSH host)
-q  quit
+python -m gpu_bench list                          workloads, models, schedulers
+python -m gpu_bench <workload> [scheduler ...]    compare
+    -m NAME       model (default: the workload's own)
+    -s A,B        only these schedulers
+    --live        live run (default: simulate)
+    --repeat N    live: average over N runs
+    --host NAME   saved host, or user@host[:port]
+    --save        keep in history
+    --out FILE    write .json, or .csv summary
+    --json        print the full result as JSON
+python -m gpu_bench gpus [--host NAME]
+python -m gpu_bench hosts [list | add | remove | test]
+python -m gpu_bench history [list | show N | export N FILE]
 ```
 
-If the shell cannot ask questions (a pipe, a non-interactive SSH command), `python -m gpu_bench` compares every sample instead.
-
-## Commands
-
-```
-python -m gpu_bench list                        workloads, models, schedulers
-python -m gpu_bench <workload> [scheduler ...]  compare (same as `run`)
-    -m/--model NAME     use this model instead of the workload's own
-    -s/--scheduler A,B  only these schedulers
-    --live              live run on the model's backend (default: simulate)
-    --repeat N          live: run each scheduler N times and average
-    --host NAME         run on a saved host, or user@host[:port]
-    --save              keep the result in the history
-    --out FILE          also write .json, or .csv (one row per scheduler)
-    --json              print the full result as JSON
-python -m gpu_bench gpus [--host NAME]          GPUs, Python, PyTorch
-python -m gpu_bench hosts [list|add|remove|test]
-python -m gpu_bench history [list|show N|export N FILE]
-python -m gpu_bench gui
-```
-
-A path works anywhere a name works. `python -m gpu_bench run -h` lists every flag.
-
-## SSH hosts
-
-A host logs in one of two ways:
-
-- **SSH key / agent** (default) — uses your normal `ssh` command, so keys, `ssh-agent`, and `~/.ssh/config` (aliases, `ProxyJump`, ...) all work. The first time you connect to a new server, run `ssh user@host` in a terminal once to accept its host key.
-- **Password** — you type the password. Either it's asked for each time you connect, or tick *Save password* and it's kept in your system's credential store (Windows Credential Manager, macOS Keychain, Linux Secret Service) — never in a file. If the server rejects a saved password, it is removed and you're asked again. The first connection to a new server shows its key fingerprint and asks whether to trust it; trusted keys go in `~/.gpu_bench/known_hosts`, and a key that later changes is refused with a warning. Password logins use the `paramiko` package (`pip install paramiko keyring`; both are built into the .exe).
-
-```
-python -m gpu_bench hosts add lab bob@lab.example.edu --password                   # ask each time
-python -m gpu_bench hosts add lab bob@lab.example.edu --password --save-password   # ask now, save it
-```
-
-In scripts with no terminal, set `GPU_BENCH_SSH_PASSWORD` instead of typing it.
-
-A host has:
-
-| Field | Meaning |
-| --- | --- |
-| host, user, port | Where to connect. host can be an alias from `~/.ssh/config`. |
-| login | SSH key / agent, or password (asked each time, or saved in the credential store). |
-| key | Private key file, if not your default (key login only). |
-| python | The Python to run on the server. Used as written, so `/opt/venv/bin/python` or `conda run -n infer python` work. |
-| scratch folder | Where a run's files go on the server (default `~/.gpu-bench`). Each run uses its own subfolder and deletes it at the end. |
-| ssh options | Extra `-o Key=Value` options (key login only). |
-
-Key logins on Windows need the OpenSSH client (Settings > Optional features). The server should be Linux or macOS.
-
-## Models and backends
-
-A model file says how long a request takes (for simulation) and, optionally, how to really run it (for live runs).
-
-```json
-{
-  "name": "my-model",
-  "description": "What it is.",
-  "runtime": { "base_ms": 30, "per_token_ms": 25, "token_field": "max_tokens" },
-  "backend": { "type": "python", "module": "my_backend.py", "config": { "device": "cuda" } }
-}
-```
-
-`runtime` uses `per_token_ms` (with `token_field`) or `per_character_ms` (with `text_field`). Without a `backend`, a live run sleeps for the runtime formula on a real clock — useful to check a setup or a host before wiring in a model. Without a `runtime`, the model can only run live.
-
-**Python backend** — a file with:
-
-```python
-def load(config):          # once: load weights, move to GPU. Returns any state.
-    ...
-def warmup(state):         # optional
-    ...
-def infer(state, job):     # once per request. Block until the GPU work is done
-    ...                    # (torch.cuda.synchronize()), or latency will be wrong.
-def close(state):          # optional
-    ...
-```
-
-**Worker backend** — a long-running process, in any language, for when your model already runs as its own server:
-
-```json
-"backend": { "type": "worker", "command": ["python", "serve.py", "--gpu", "0"], "cwd": "/srv/model" }
-```
-
-It prints `{"ready": true}` once loaded, then reads one line `{"job": {...}}` per request and answers with `{"ok": true}` or `{"error": "..."}`. Logs go to stderr. See `defaults/backends/worker_example.py`.
-
-Relative paths are relative to the model file. For SSH runs, a Python backend module and any worker script given by a relative path are sent along automatically; use `cwd` with an absolute path for code that already lives on the server.
+A file path works anywhere a name works. Add `-h` to any command for every option.
 
 ## Your own files
 
-Put your workloads, models, and schedulers in `~/.gpu_bench/workloads`, `~/.gpu_bench/models`, and `~/.gpu_bench/schedulers` and they show up by name next to the samples (or pass a path, or use *Add your own file...* in the window). Saved hosts, run history, and window settings also live in `~/.gpu_bench`; set `GPU_BENCH_HOME` to use another folder.
+Put them in `~/.gpu_bench/workloads`, `models`, or `schedulers` and they appear by name next to the samples. That folder also holds saved hosts, history, trusted server keys, and settings; set `GPU_BENCH_HOME` to move it. Passwords are never written there.
 
-## Sample files
-
-| File | What it is for |
-| --- | --- |
-| `defaults/workloads/mixed-lengths.json` | A long text-to-speech request, then shorter ones waiting behind it. Pairs with `example-tts`. |
-| `defaults/workloads/priority-mix.json` | Same-length requests at different priorities, arriving together. Pairs with `example-tts`. |
-| `defaults/workloads/token-mix.json` | A long language-model request, then shorter generations. Pairs with `example-llm`. |
-| `defaults/models/example-tts.json` | Stand-in text-to-speech model. Runtime `40 + 3 * characters` ms. |
-| `defaults/models/example-llm.json` | Stand-in language model. Runtime `30 + 25 * max_tokens` ms. |
-| `defaults/models/synthetic-gpu.json` | Real GPU load: PyTorch matrix multiplies sized by the request. Live only in practice. |
-| `defaults/models/example-worker.json` | Same timing as `example-llm`, served by a worker process. A template for your own server. |
-| `defaults/backends/torch_matmul.py` | The Python backend behind `synthetic-gpu`. Copy it to start your own. |
-| `defaults/backends/worker_example.py` | A minimal worker. |
-| `defaults/schedulers/fifo.py` | First come, first served. |
-| `defaults/schedulers/shortest_predicted.py` | Shortest predicted job first. |
-| `defaults/schedulers/priority.py` | Higher `priority` first. |
-| `defaults/schedulers/aging.py` | Priority that rises the longer a request waits. |
-
-## Workload file
+**Workload**: requests arriving over time.
 
 ```json
-{
-  "name": "mixed-lengths",
-  "description": "Why this workload exists.",
-  "model": "example-tts",
-  "jobs": [
-    { "id": "short-1", "arrival_ms": 0, "priority": 1, "predicted_duration_ms": 58, "input": { "text": "Hello." } }
-  ]
-}
+{ "name": "my-load", "model": "example-llm",
+  "jobs": [ { "id": "a", "arrival_ms": 0, "priority": 1, "predicted_duration_ms": 430, "input": { "max_tokens": 16 } } ] }
 ```
 
-- `arrival_ms` is when the request shows up, relative to the start of the run.
-- `priority` is a number. Higher is more important. The sample schedulers treat a missing priority as `0`.
-- `predicted_duration_ms` is the estimate a scheduler can see before the job runs. It can differ from the real runtime.
-- `input` is what the model reads.
+`priority`: higher runs first (missing means 0). `predicted_duration_ms`: what a scheduler sees before a request runs. `input`: what the model reads.
 
-## Scheduler file
+**Scheduler**: one function. Don't modify `ready`.
 
 ```python
 def select(ready, now_ms):
-    """Return the next job to run.
-
-    ready: list of job dicts waiting on the GPU (don't modify it)
-    now_ms: current time in the run (real elapsed time in live runs)
-    """
-    return ready[0]
+    return min(ready, key=lambda job: job["arrival_ms"])
 ```
+
+**Model**: `runtime` is used for simulation; `backend` (optional) runs requests for real in live mode. Without a backend, a live run just waits for the formula's time, which is a quick way to test a setup or host.
+
+```json
+{ "name": "my-model",
+  "runtime": { "base_ms": 30, "per_token_ms": 25, "token_field": "max_tokens" },
+  "backend": { "type": "python", "module": "my_backend.py", "config": { "device": "cuda" } } }
+```
+
+`runtime` takes `per_token_ms` + `token_field`, or `per_character_ms` + `text_field`. Backends:
+
+- **python**: a file with `load(config) -> state` and `infer(state, job)`, plus optional `warmup(state)` and `close(state)`. `infer` must block until the GPU work finishes (`torch.cuda.synchronize()`). Start from `defaults/backends/torch_matmul.py`.
+- **worker**: `{"type": "worker", "command": ["python", "serve.py"], "cwd": "/srv/model"}`. This is a long-running process in any language. It prints `{"ready": true}` once loaded, then answers each `{"job": {...}}` line with `{"ok": true}` or `{"error": "..."}`. Start from `defaults/backends/worker_example.py`.
+
+Paths are relative to the model file. For SSH runs, relative backend files are copied over automatically; use an absolute `cwd` for code that already lives on the server.
+
+## Samples
+
+| | |
+| --- | --- |
+| Workloads | `mixed-lengths` (long TTS request blocking short ones), `priority-mix` (equal lengths, mixed priorities), `token-mix` (long LLM generation, then short ones) |
+| Models | `example-tts`, `example-llm` (formula only), `synthetic-gpu` (real PyTorch GPU load), `example-worker` (worker template) |
+| Schedulers | `fifo`, `shortest_predicted`, `priority`, `aging` (priority that grows with waiting time) |
 
 ## What a run reports
 
-For each scheduler:
+Per scheduler: mean and p95 latency (arrival to finish), mean wait, and jobs/s. Live runs add GPU busy % and peak memory (NVIDIA), plus the spread across repeats.
 
-- mean and p95 latency, arrival to finish (`mean_ms`, `p95_ms`)
-- mean time spent waiting (`wait_ms`)
-- throughput (`jobs/s`)
-- live runs: GPU busy % and peak GPU memory (NVIDIA), and with repeats, the spread of mean latency across runs
+Typical trade-offs: shortest-job wins on average latency but makes long requests wait; strict priority can starve low-priority work; aging balances the two.
 
-Shortest-job often wins on average latency and loses on the long requests. Strict priority keeps high-priority work fast and can starve the rest. Aging pushes back on that.
-
-## Tests
+## Development
 
 ```
-python -m unittest discover tests
+python -m unittest discover tests                  # tests
+pip install pyinstaller && python build_exe.py     # rebuild GPU-Inference-Scheduler.exe
 ```
 
-## Later
-
-- Batching and multiple concurrent slots per GPU.
-- Preemptive and dynamic policies that change mid-run.
+Planned: batching and concurrent slots per GPU, preemptive and dynamic policies.
