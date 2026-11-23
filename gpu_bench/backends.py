@@ -64,6 +64,19 @@ def open_backend(model, model_path):
     raise ValueError(f"{model.get('name', 'model')} has unknown backend type '{kind}'. Use python or worker.")
 
 
+def _python_executable():
+    """The Python running gpu-bench, or a Python on PATH when running from the packaged .exe."""
+    if not getattr(sys, "frozen", False):
+        return sys.executable
+    import shutil
+
+    for name in ("python", "python3", "py"):
+        found = shutil.which(name)
+        if found and "WindowsApps" not in found:
+            return found
+    raise ValueError("this worker needs Python, and none was found on PATH. Install Python 3 or use a full path.")
+
+
 class SleepBackend:
     """Sleeps for the runtime formula. Same timing as a simulation, but on a real clock."""
 
@@ -135,7 +148,7 @@ class WorkerBackend:
             raise ValueError(f"{model.get('name', 'model')}: a worker backend needs a command")
         command = list(command)
         if command[0] in ("python", "python3"):
-            command[0] = sys.executable
+            command[0] = _python_executable()
         cwd = Path(backend["cwd"]).expanduser() if backend.get("cwd") else base
         if not cwd.is_absolute():
             cwd = (base / cwd).resolve()
