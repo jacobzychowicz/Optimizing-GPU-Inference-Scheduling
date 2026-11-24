@@ -30,7 +30,7 @@ jobs:
           ./dist/GPU-Inference-Scheduler.exe list
           ./dist/GPU-Inference-Scheduler.exe narration-small fifo fair_share
           ./dist/GPU-Inference-Scheduler.exe hosts -h
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: windows
           path: dist/GPU-Inference-Scheduler.exe
@@ -53,7 +53,7 @@ jobs:
       - name: Package
         # a tarball keeps the executable bit, which artifact zips drop
         run: tar -czf GPU-Inference-Scheduler-linux-x86_64.tar.gz -C dist GPU-Inference-Scheduler-linux-x86_64
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: linux
           path: GPU-Inference-Scheduler-linux-x86_64.tar.gz
@@ -63,7 +63,7 @@ jobs:
     needs: [windows, linux]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           path: assets
           merge-multiple: true
