@@ -126,6 +126,16 @@ class StoreTests(TempHome):
         store.remove_host("box")
         self.assertEqual(store.load_hosts(), [])
 
+    def test_hosts_add_reads_port_from_target(self):
+        from contextlib import redirect_stdout
+
+        from gpu_bench.cli import main
+
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["hosts", "add", "box", "me@10.0.0.5:2222"]), 0)
+        host = store.find_host("box")
+        self.assertEqual((host["host"], host["port"], host["user"]), ("10.0.0.5", 2222, "me"))
+
     def test_history_and_export(self):
         result = runner.execute(*self.tiny(), FIFO + SJF)
         store.save_run(result)

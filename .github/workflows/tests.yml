@@ -10,13 +10,27 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python: ["3.9", "3.12"]
+        python: ["3.10", "3.13"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
+      - name: Unit tests
+        run: python -m unittest discover tests -v
+      - name: Command line smoke test
+        run: |
+          python -m gpu_bench list
+          python -m gpu_bench narration-small fifo fair_share retake_first
+
+  # SSH servers only need Python 3.8+, and setup-python no longer ships 3.8/3.9 on
+  # current Ubuntu runners, so the oldest supported version runs in a container.
+  oldest-python:
+    runs-on: ubuntu-latest
+    container: python:3.8-slim
+    steps:
+      - uses: actions/checkout@v5
       - name: Unit tests
         run: python -m unittest discover tests -v
       - name: Command line smoke test

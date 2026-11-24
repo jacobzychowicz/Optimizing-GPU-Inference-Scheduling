@@ -7,6 +7,9 @@ model's real runtime if you edit one and not the other.
 
 def select(ready, now_ms):
     """Return the job with the smallest predicted duration."""
+    for job in ready:
+        if "predicted_duration_ms" not in job:
+            raise ValueError(f"job {job['id']} has no predicted_duration_ms")
     return min(
         ready,
         key=lambda job: (

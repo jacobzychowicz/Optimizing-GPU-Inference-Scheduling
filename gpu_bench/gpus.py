@@ -162,7 +162,7 @@ class Sampler:
         try:
             self._proc = subprocess.Popen(
                 [exe, "--query-gpu=timestamp,index,utilization.gpu,memory.used",
-                 "--format=csv,noheader,nounits", f"-lms={self.interval_ms}"],
+                 "--format=csv,noheader,nounits", f"--loop-ms={self.interval_ms}"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 text=True,

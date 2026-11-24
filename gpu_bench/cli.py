@@ -575,12 +575,17 @@ def cmd_hosts(argv):
             if not password:
                 raise ValueError("no password typed")
         user, _, address = args.target.rpartition("@")
+        port = args.port
+        if address.count(":") == 1:  # user@host:port, like --host accepts
+            address, typed_port = address.split(":")
+            if port is None:
+                port = typed_port
         host = store.save_host(
             {
                 "name": args.name,
                 "host": address,
                 "user": user,
-                "port": args.port,
+                "port": port,
                 "key": args.key,
                 "python": args.python,
                 "workdir": args.workdir,
