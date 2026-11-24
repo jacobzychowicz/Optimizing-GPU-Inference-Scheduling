@@ -328,5 +328,24 @@ class RemoteTests(TempHome):
         self.assertIn("Python was not found", remote.explain_failure(host, 127, ["python3: command not found"]))
 
 
+class PackagedAppTests(TempHome):
+    def test_entry_runs_the_command_line_with_arguments(self):
+        from contextlib import redirect_stdout
+
+        import launch_app
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(launch_app.main(["list", "schedulers"]), 0)
+        self.assertIn("fair_share", out.getvalue())
+
+    def test_bundle_has_every_module_the_server_needs(self):
+        bundle, _args = remote.build_bundle()
+        with tarfile.open(fileobj=io.BytesIO(bundle), mode="r:gz") as tar:
+            names = set(tar.getnames())
+        for module in ("cli", "runner", "compare", "catalog", "backends", "gpus", "store", "remote"):
+            self.assertIn(f"gpu_bench/{module}.py", names)
+
+
 if __name__ == "__main__":
     unittest.main()

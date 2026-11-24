@@ -652,6 +652,8 @@ def cmd_history(argv):
 
 
 def program_name():
+    if getattr(sys, "frozen", False):  # the packaged app: GPU-Inference-Scheduler.exe or the Linux binary
+        return Path(sys.executable).name
     invoked = Path(sys.argv[0]).name if sys.argv else ""
     if invoked == "gpu-bench":
         return "gpu-bench"
@@ -660,10 +662,15 @@ def program_name():
 
 def top_help():
     prog = program_name()
+    if getattr(sys, "frozen", False):
+        intro = (f"With no arguments, `{prog}` opens the desktop window\n"
+                 f"(on Linux without a display, a menu). `{prog} menu` opens the menu.")
+    else:
+        intro = (f"In a terminal, `{prog}` opens a menu. Choose a model, a workload, and\n"
+                 "schedulers, then run. Names and flags still run directly, with no menu.")
     return f"""usage: {prog} [menu|list|run|gpus|hosts|history|generate|calibrate|gui] [name ...]
 
-In a terminal, `{prog}` opens a menu. Choose a model, a workload, and
-schedulers, then run. Names and flags still run directly, with no menu.
+{intro}
 
   {prog}
   {prog} mixed-lengths fifo priority

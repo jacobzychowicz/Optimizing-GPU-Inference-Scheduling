@@ -1,0 +1,76 @@
+name: release
+
+# Builds the Windows .exe and the Linux binary. Run it by hand (Actions tab) to get
+# them as downloadable artifacts, or push a tag like v1.2.0 to also attach them to a
+# GitHub Release.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: |
+          python -m pip install pyinstaller -r requirements-gui.txt
+          python build.py
+      - name: Smoke test
+        shell: bash
+        run: |
+          ./dist/GPU-Inference-Scheduler.exe list
+          ./dist/GPU-Inference-Scheduler.exe narration-small fifo fair_share
+          ./dist/GPU-Inference-Scheduler.exe hosts -h
+      - uses: actions/upload-artifact@v5
+        with:
+          name: windows
+          path: dist/GPU-Inference-Scheduler.exe
+
+  linux:
+    runs-on: ubuntu-latest
+    # Built against an older glibc (2.31) so the binary runs on Ubuntu 20.04+ / Debian 11+.
+    container: python:3.11-bullseye
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build
+        run: |
+          python -m pip install pyinstaller -r requirements-gui.txt
+          python build.py
+      - name: Smoke test
+        run: |
+          ./dist/GPU-Inference-Scheduler-linux-x86_64 list
+          ./dist/GPU-Inference-Scheduler-linux-x86_64 narration-small fifo fair_share
+          ./dist/GPU-Inference-Scheduler-linux-x86_64 hosts -h
+      - name: Package
+        # a tarball keeps the executable bit, which artifact zips drop
+        run: tar -czf GPU-Inference-Scheduler-linux-x86_64.tar.gz -C dist GPU-Inference-Scheduler-linux-x86_64
+      - uses: actions/upload-artifact@v5
+        with:
+          name: linux
+          path: GPU-Inference-Scheduler-linux-x86_64.tar.gz
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" assets/* --repo "$GITHUB_REPOSITORY" --clobber

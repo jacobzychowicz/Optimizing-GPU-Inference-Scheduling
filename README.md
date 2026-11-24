@@ -21,7 +21,7 @@ It started with a voice-cloning narration app, [RecapVox](docs/results.md). A lo
 - **Live on GPU**: replays arrivals in real time on a real backend (voice-cloning XTTS-v2, your own Python model or server process, or a PyTorch load generator) and samples GPU busy % and memory.
 - **Over SSH**: runs on any Linux GPU server with Python 3.8+. Nothing gets installed there. Log in with keys or a saved password.
 - **Generates traffic**: narration bursts and retakes, or steady, bursty, and ramping request streams.
-- **Desktop app** (PySide6, with a Windows .exe) with charts, a per-request timeline, history, and CSV/JSON/PNG export, plus a full CLI.
+- **Desktop app** (PySide6, with a Windows .exe and a Linux binary) with charts, a per-request timeline, history, and CSV/JSON/PNG export, plus a full CLI.
 
 Scheduling is non-preemptive and request-level: whenever the GPU is free, the scheduler picks which waiting request runs next.
 
@@ -31,8 +31,11 @@ Scheduling is non-preemptive and request-level: whenever the GPU is free, the sc
 
 | You want | Do this |
 | --- | --- |
-| Just the desktop app (Windows) | Download `GPU-Inference-Scheduler.exe` from [Releases](https://github.com/jacobzychowicz/Optimizing-GPU-Inference-Scheduling/releases/latest) and double-click it. Nothing else to install. |
+| Windows app | Download `GPU-Inference-Scheduler.exe` from [Releases](https://github.com/jacobzychowicz/Optimizing-GPU-Inference-Scheduling/releases/latest) and double-click it. Nothing else to install. |
+| Linux app | Download `GPU-Inference-Scheduler-linux-x86_64.tar.gz` from [Releases](https://github.com/jacobzychowicz/Optimizing-GPU-Inference-Scheduling/releases/latest), then `tar xzf GPU-Inference-Scheduler-linux-x86_64.tar.gz` and `./GPU-Inference-Scheduler-linux-x86_64`. Runs on Ubuntu 20.04+ / Debian 11+ and similar. |
 | Everything (any OS) | `git clone https://github.com/jacobzychowicz/Optimizing-GPU-Inference-Scheduling.git` with Python 3.8+ installed. |
+
+Both apps open the desktop window when started with no arguments, and take the same commands as `python -m gpu_bench` when given arguments, for example `GPU-Inference-Scheduler.exe hosts test gpu-box` or `./GPU-Inference-Scheduler-linux-x86_64 token-mix --live`. On a Linux machine with no display, the Linux app opens the terminal menu instead of the window. Both can run on an SSH server (Linux or macOS with Python 3.8+), with key or password login; the Windows app uses the built-in Windows OpenSSH client for key logins. The window on Linux needs the usual Qt desktop libraries (on Ubuntu: `sudo apt install libxcb-cursor0 libegl1`); the command line needs nothing.
 
 ### 2. Install what you need (Python install only)
 
@@ -90,7 +93,7 @@ Notes:
 - Key logins on Windows need the OpenSSH client (Settings → Optional features).
 - A password login shows a new server's key fingerprint once and asks you to trust it. A saved password the server rejects is deleted, and you're asked again.
 - For scripts with no terminal, set `GPU_BENCH_SSH_PASSWORD`.
-- The `.exe` has no PyTorch, so `synthetic-gpu` runs live only on SSH hosts. Worker backends need Python installed.
+- The packaged apps have no PyTorch, so `synthetic-gpu` and `xtts` run live only on SSH hosts (or from a Python install). Worker backends need Python installed.
 
 ## Using it
 
@@ -178,7 +181,12 @@ Typical trade-offs: shortest-job wins on average latency but makes long requests
 
 ```
 python -m unittest discover tests                  # tests
-pip install pyinstaller && python build_exe.py     # build GPU-Inference-Scheduler.exe (attach it to a GitHub Release)
+pip install pyinstaller -r requirements-gui.txt && python build.py   # app for this OS, in dist/
+```
+
+`build.py` makes `GPU-Inference-Scheduler.exe` on Windows and `GPU-Inference-Scheduler-linux-x86_64` on Linux (PyInstaller can't cross-compile, so build each on its own OS). The `release` workflow builds both on GitHub: run it from the Actions tab to download them, or push a tag (`git tag v1.0.0 && git push --tags`) to attach them to a Release.
+
+```
 python docs/make_images.py [result.json]           # regenerate the icon and README images
 ```
 

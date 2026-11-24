@@ -65,7 +65,7 @@ def main():
     assets.mkdir(exist_ok=True)
     draw_icon(256).save(str(assets / "icon.png"))
     if not draw_icon(256).save(str(assets / "icon.ico"), "ICO"):
-        print("could not write icon.ico (Qt ICO plugin missing); build_exe.py will skip the icon")
+        print("could not write icon.ico (Qt ICO plugin missing); build.py will skip the icon")
 
     from gpu_bench.charts import LatencyBars, LatencyCDF
     from gpu_bench.compare import MODELS, SCHEDULERS, WORKLOADS
