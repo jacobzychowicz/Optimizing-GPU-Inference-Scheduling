@@ -22,11 +22,9 @@ def nice_ticks(top, count=5):
     raw = top / count
     magnitude = 10 ** math.floor(math.log10(raw))
     step = next(m * magnitude for m in (1, 2, 2.5, 5, 10) if m * magnitude >= raw)
-    ticks = []
-    value = 0.0
-    while value < top + step * 0.5:
-        ticks.append(value)
-        value += step
+    ticks = [0.0]
+    while ticks[-1] < top:  # the last tick must reach top, or the largest value is drawn off the axis
+        ticks.append(round(ticks[-1] + step, 10))
     return ticks
 
 

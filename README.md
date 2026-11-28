@@ -14,7 +14,9 @@ It started with a voice-cloning narration app, [RecapVox](docs/results.md). A lo
 | fifo | 13.8 s | 10.7 s | same |
 | **fair_share** | **0.65 s (21× faster)** | 12.3 s | same |
 
-<sub>Simulated `narration-small` workload; see [docs/results.md](docs/results.md) for the full comparison and the live GPU run.</sub>
+<sub>Simulated `narration-small` workload (78 requests). At a larger size (`narration-busy`, 409 requests) the gap grows to 102.6 s → 0.83 s, **123×**. Throughput is the same by construction: the GPU does the same work in a different order. See [docs/results.md](docs/results.md) for the full comparison.</sub>
+
+![The desktop app comparing six schedulers on narration-small](docs/images/app.png)
 
 **What it does**
 - **Simulate** in milliseconds from a model's runtime formula, or **calibrate** that formula from a real GPU run so the simulation matches the hardware.

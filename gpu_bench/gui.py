@@ -49,6 +49,15 @@ except ImportError:
 
 _BAR_COLORS = ("#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2", "#b279a2", "#eeca3b", "#9d755d")
 LOCAL = "__local__"
+DEFAULT_WORKLOAD = "narration-small"
+
+
+def _credential_store_name():
+    if sys.platform.startswith("win"):
+        return "Windows Credential Manager"
+    if sys.platform == "darwin":
+        return "macOS Keychain"
+    return "the system keyring"
 
 
 def main():
@@ -116,7 +125,7 @@ if Qt is not None:
             self.remember = QCheckBox("Remember this password")
             if can_save_passwords():
                 self.remember.setChecked(remember_default)
-                self.remember.setToolTip("Kept in your system's credential store (Windows Credential Manager), not in a file.")
+                self.remember.setToolTip(f"Kept in {_credential_store_name()}, not in a file.")
             else:
                 self.remember.setEnabled(False)
                 self.remember.setToolTip("No credential store is available on this computer.")
@@ -409,7 +418,7 @@ if Qt is not None:
             self.password.setEchoMode(QLineEdit.EchoMode.Password)
             from gpu_bench.store import can_save_passwords
 
-            self.save_password = QCheckBox("Save password (Windows Credential Manager)")
+            self.save_password = QCheckBox(f"Save password ({_credential_store_name()})")
             if not can_save_passwords():
                 self.save_password.setEnabled(False)
                 self.save_password.setToolTip("No credential store is available, so the password is asked for each time.")
@@ -559,7 +568,7 @@ if Qt is not None:
             self._refresh(host["name"])
             note = ""
             if host["auth"] == "password":
-                note = " The password is saved in Windows Credential Manager." if host["save_password"] and typed else (
+                note = f" The password is saved in {_credential_store_name()}." if host["save_password"] and typed else (
                     " You'll be asked for the password when connecting." if not host["save_password"]
                     else "")
             self.output.setPlainText(f"Saved {host['name']}.{note}")
@@ -916,7 +925,9 @@ if Qt is not None:
             self.models.blockSignals(False)
 
             names = [item["name"] for item in self._workloads]
-            self.workloads.setCurrentRow(names.index(previous[0]) if previous[0] in names else (0 if names else -1))
+            # first run: open on the narration demo, where the schedulers actually differ
+            default = previous[0] if previous[0] in names else (DEFAULT_WORKLOAD if DEFAULT_WORKLOAD in names else None)
+            self.workloads.setCurrentRow(names.index(default) if default else (0 if names else -1))
             if previous[1]:
                 model_names = [item["name"] for item in self._models]
                 if previous[1] in model_names:

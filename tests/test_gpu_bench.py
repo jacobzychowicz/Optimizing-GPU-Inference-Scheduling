@@ -347,5 +347,18 @@ class PackagedAppTests(TempHome):
             self.assertIn(f"gpu_bench/{module}.py", names)
 
 
+class ChartTests(unittest.TestCase):
+    def test_axis_reaches_the_largest_value(self):
+        try:
+            from gpu_bench.charts import nice_ticks
+        except ImportError:  # charts need PySide6 (and its system libraries), which CI doesn't install
+            self.skipTest("PySide6 is not available")
+        for top in (1, 7, 999, 1056, 1276, 17900, 22337, 24790, 160532):
+            ticks = nice_ticks(top)
+            self.assertEqual(ticks[0], 0)
+            self.assertGreaterEqual(ticks[-1], top)
+            self.assertLess(ticks[-2], top)
+
+
 if __name__ == "__main__":
     unittest.main()
